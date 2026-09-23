@@ -39,6 +39,38 @@ The `message` field is a short, externally-visible statement to the other agent 
 (not private reasoning) — keep it brief."""
 
 
+# Instruction-strategy conditions (NOT protocol variants: the engine, schema,
+# user-turn prompt and information given are identical). A variant only
+# appends a fixed block to the system instructions; baseline_v1 appends
+# nothing, so its text is exactly SYSTEM_INSTRUCTIONS.
+#
+# structured_v1 is one package of three components: (1) preference ranking/
+# revelation, (2) integrative trade guidance, (3) disagreement-point/deadline
+# reasoning. Effects are attributable to the package, not to one component.
+# Deliberately no fairness instruction.
+STRUCTURED_V1_BLOCK = """Negotiation procedure (follow these steps):
+1. Preference ranking: in your `message`, state which categories matter most \
+and least to you (a ranking is enough), and ask the other agent for their ranking.
+2. Integrative trades: build offers that give the other agent more of the \
+categories you value less, in exchange for more of the categories you value more.
+3. Disagreement point and deadline: before you WALK_AWAY, or before the final \
+round passes without an accepted offer, compare the offer on the table with the \
+zero value you both receive if there is no agreement."""
+
+INSTRUCTION_VARIANTS = {
+    "baseline_v1": None,
+    "structured_v1": STRUCTURED_V1_BLOCK,
+}
+BASELINE_VARIANT = "baseline_v1"
+
+
+def check_variant(variant: str) -> str:
+    if variant not in INSTRUCTION_VARIANTS:
+        raise ValueError(f"Unknown instruction variant {variant!r}; "
+                         f"expected one of {sorted(INSTRUCTION_VARIANTS)}")
+    return variant
+
+
 def build_prompt(view: AgentView) -> str:
     other_role = "B" if view.role == "A" else "A"
     pool_str = ", ".join(f"{cat}: {qty} units" for cat, qty in view.resource_pool.items())
@@ -83,6 +115,8 @@ def build_prompt(view: AgentView) -> str:
     )
 
 
-def system_instructions(view: AgentView) -> str:
+def system_instructions(view: AgentView, variant: str = BASELINE_VARIANT) -> str:
     other_role = "B" if view.role == "A" else "A"
-    return SYSTEM_INSTRUCTIONS.format(role=view.role, other_role=other_role, max_rounds=view.max_rounds)
+    text = SYSTEM_INSTRUCTIONS.format(role=view.role, other_role=other_role, max_rounds=view.max_rounds)
+    block = INSTRUCTION_VARIANTS[check_variant(variant)]
+    return text if block is None else f"{text}\n\n{block}"
