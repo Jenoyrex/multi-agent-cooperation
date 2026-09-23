@@ -14,28 +14,36 @@ from src.agents.base import Agent, AgentView, CallRecord
 from src.agents.generation import GenerationConfig, call_with_retries
 from src.agents.parsing import parse_action
 from src.agents.prompting import build_prompt, system_instructions
-from src.agents.schema import InvalidAgentOutputError, NegotiationAction, TransportError
+from src.agents.schema import InvalidAgentOutputError, NegotiationAction, TransportError, allocation_json_schema
+from src.environment.resources import DEFAULT_CATEGORY_NAMES
 
-RESPONSE_SCHEMA = {
-    "name": "negotiation_action",
-    "schema": {
-        "type": "object",
-        "properties": {
-            "action_type": {"type": "string", "enum": ["OFFER", "ACCEPT", "WALK_AWAY"]},
-            "allocation": {
-                "type": ["object", "null"],
-                "description": (
-                    "Required if action_type is OFFER. Maps each category name to "
-                    "the number of units YOU would receive."
-                ),
+ALLOCATION_DESCRIPTION = (
+    "Required if action_type is OFFER. Maps each category name to "
+    "the number of units YOU would receive."
+)
+
+
+def response_schema(categories) -> dict:
+    """Strict structured-output schema, with the allocation keyed by this
+    pool's categories (strict mode needs every object's keys listed)."""
+    return {
+        "name": "negotiation_action",
+        "schema": {
+            "type": "object",
+            "properties": {
+                "action_type": {"type": "string", "enum": ["OFFER", "ACCEPT", "WALK_AWAY"]},
+                "allocation": allocation_json_schema(categories, ALLOCATION_DESCRIPTION),
+                "message": {"type": ["string", "null"]},
             },
-            "message": {"type": ["string", "null"]},
+            "required": ["action_type", "allocation", "message"],
+            "additionalProperties": False,
         },
-        "required": ["action_type", "allocation", "message"],
-        "additionalProperties": False,
-    },
-    "strict": True,
-}
+        "strict": True,
+    }
+
+
+# The schema as sent for the default pool; fingerprinted by provenance.prompt_hash.
+RESPONSE_SCHEMA = response_schema(DEFAULT_CATEGORY_NAMES)
 
 
 class OpenAIAgent(Agent):
@@ -64,7 +72,7 @@ class OpenAIAgent(Agent):
                 {"role": "system", "content": system_instructions(view)},
                 {"role": "user", "content": build_prompt(view)},
             ],
-            response_format={"type": "json_schema", "json_schema": RESPONSE_SCHEMA},
+            response_format={"type": "json_schema", "json_schema": response_schema(view.resource_pool)},
         )
         try:
             response, attempts, latency = await call_with_retries(

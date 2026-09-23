@@ -14,28 +14,35 @@ from src.agents.base import Agent, AgentView, CallRecord
 from src.agents.generation import GenerationConfig, call_with_retries
 from src.agents.parsing import parse_action
 from src.agents.prompting import build_prompt, system_instructions
-from src.agents.schema import InvalidAgentOutputError, NegotiationAction, TransportError
+from src.agents.schema import InvalidAgentOutputError, NegotiationAction, TransportError, allocation_json_schema
+from src.environment.resources import DEFAULT_CATEGORY_NAMES
 
-ACTION_TOOL = {
-    "name": "submit_negotiation_action",
-    "description": "Submit your action for this negotiation turn.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "action_type": {"type": "string", "enum": ["OFFER", "ACCEPT", "WALK_AWAY"]},
-            "allocation": {
-                "type": ["object", "null"],
-                "description": (
-                    "Required if action_type is OFFER. Maps each category name to "
-                    "the number of units YOU would receive; the rest of that "
-                    "category's units go to the other agent."
-                ),
+ALLOCATION_DESCRIPTION = (
+    "Required if action_type is OFFER. Maps each category name to "
+    "the number of units YOU would receive; the rest of that "
+    "category's units go to the other agent."
+)
+
+
+def action_tool(categories) -> dict:
+    """The forced tool, with the allocation keyed by this pool's categories."""
+    return {
+        "name": "submit_negotiation_action",
+        "description": "Submit your action for this negotiation turn.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "action_type": {"type": "string", "enum": ["OFFER", "ACCEPT", "WALK_AWAY"]},
+                "allocation": allocation_json_schema(categories, ALLOCATION_DESCRIPTION),
+                "message": {"type": ["string", "null"]},
             },
-            "message": {"type": ["string", "null"]},
+            "required": ["action_type"],
         },
-        "required": ["action_type"],
-    },
-}
+    }
+
+
+# The tool as sent for the default pool; fingerprinted by provenance.prompt_hash.
+ACTION_TOOL = action_tool(DEFAULT_CATEGORY_NAMES)
 
 
 class ClaudeAgent(Agent):
@@ -62,7 +69,7 @@ class ClaudeAgent(Agent):
             temperature=cfg.temperature,
             system=system_instructions(view),
             messages=[{"role": "user", "content": build_prompt(view)}],
-            tools=[ACTION_TOOL],
+            tools=[action_tool(view.resource_pool)],
             tool_choice={"type": "tool", "name": "submit_negotiation_action"},
         )
         try:
