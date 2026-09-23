@@ -298,3 +298,111 @@ async def test_missing_usage_metadata_stays_unknown_not_zero(kind):
     assert call["input_tokens"] is None and call["output_tokens"] is None
     assert record.input_tokens is None and record.output_tokens is None and record.cost_usd is None
     assert record.api_calls == 1 and call["latency_s"] is not None
+
+
+# ------------------------------------------- structured-output schemas
+def _strict_violations(node, path="$"):
+    """OpenAI strict structured-output rules for objects: every object lists
+    its properties, forbids additional ones, and requires all of them."""
+    out = []
+    if not isinstance(node, dict):
+        return out
+    types = node.get("type")
+    if types == "object" or (isinstance(types, list) and "object" in types):
+        props = node.get("properties")
+        if not isinstance(props, dict):
+            out.append(f"{path}: object without properties")
+            props = {}
+        if node.get("additionalProperties") is not False:
+            out.append(f"{path}: additionalProperties is not false")
+        if set(node.get("required", [])) != set(props):
+            out.append(f"{path}: not every property is required")
+    for key, child in (node.get("properties") or {}).items():
+        out += _strict_violations(child, f"{path}.{key}")
+    for i, child in enumerate(node.get("anyOf", [])):
+        out += _strict_violations(child, f"{path}.anyOf[{i}]")
+    return out
+
+
+def _allocation_object(schema: dict) -> dict:
+    """The non-null branch of the allocation property."""
+    branches = schema["properties"]["allocation"]["anyOf"]
+    assert {"type": "null"} in branches
+    return next(b for b in branches if b.get("type") == "object")
+
+
+def _sent_schema(kind, client) -> dict:
+    sent = client.calls[0]
+    if kind == "claude":
+        return sent["tools"][0]["input_schema"]
+    return sent["response_format"]["json_schema"]["schema"]
+
+
+def test_strict_checker_flags_the_pre_fix_openai_schema():
+    pre_fix = {
+        "type": "object",
+        "properties": {
+            "action_type": {"type": "string"},
+            "allocation": {"type": ["object", "null"], "description": "free-form map"},
+            "message": {"type": ["string", "null"]},
+        },
+        "required": ["action_type", "allocation", "message"],
+        "additionalProperties": False,
+    }
+    assert _strict_violations(pre_fix) == [
+        "$.allocation: object without properties",
+        "$.allocation: additionalProperties is not false",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_openai_schema_sent_is_strict_valid_and_keyed_by_pool():
+    agent, client = make_agent("openai", wrap("openai", {"action_type": "WALK_AWAY",
+                                                         "allocation": None, "message": None}))
+    _, state = await run_first_turn(agent)
+
+    json_schema = client.calls[0]["response_format"]["json_schema"]
+    assert json_schema["strict"] is True
+    assert "anyOf" not in json_schema["schema"]  # strict root must be a plain object
+    assert _strict_violations(json_schema["schema"]) == []
+    alloc = _allocation_object(json_schema["schema"])
+    assert list(alloc["properties"]) == list(state.resource_pool)
+    assert all(p == {"type": "integer"} for p in alloc["properties"].values())
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", KINDS)
+async def test_schema_conforming_offer_passes_parser_and_protocol_unchanged(kind):
+    """Both providers get the same allocation shape, and an output built from
+    exactly the schema's keys goes through the existing parser + validator."""
+    probe, probe_client = make_agent(kind, wrap(kind, {"action_type": "WALK_AWAY"}))
+    _, state = await run_first_turn(probe)
+    alloc = _allocation_object(_sent_schema(kind, probe_client))
+    assert alloc["required"] == list(state.resource_pool)
+    assert alloc["additionalProperties"] is False
+
+    mine = {c: state.resource_pool[c] // 3 for c in alloc["properties"]}
+    agent, _ = make_agent(kind, wrap(kind, {"action_type": "OFFER", "allocation": mine,
+                                            "message": None}))
+    record, _ = await run_first_turn(agent)
+    assert record.outcome == "walked_away"  # A's offer was accepted as valid; B walked
+    offer = record.transcript[0].action.allocation
+    assert offer["A"] == mine
+    assert offer["B"] == {c: q - mine[c] for c, q in state.resource_pool.items()}
+
+
+def test_provider_schemas_identical_allocation_shape_and_fingerprinted_constants():
+    from src.agents.claude_agent import ACTION_TOOL, action_tool
+    from src.agents.openai_agent import RESPONSE_SCHEMA, response_schema
+    from src.environment.resources import generate_resource_pool
+
+    pool = generate_resource_pool(seed=31)
+    claude_alloc = _allocation_object(action_tool(pool)["input_schema"])
+    openai_alloc = _allocation_object(response_schema(pool)["schema"])
+    # Same keys/types/requiredness for both providers; only descriptions differ.
+    strip = lambda s: {k: v for k, v in s.items() if k != "description"}
+    assert strip(claude_alloc) == strip(openai_alloc)
+    # provenance.prompt_hash fingerprints these constants: they must equal
+    # what is actually sent for a default-generated pool.
+    assert ACTION_TOOL == action_tool(pool)
+    assert RESPONSE_SCHEMA == response_schema(pool)

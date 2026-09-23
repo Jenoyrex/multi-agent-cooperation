@@ -6,9 +6,32 @@ through this schema — it has no model-specific knowledge.
 """
 from __future__ import annotations
 
-from typing import Dict, Literal, Optional
+from typing import Dict, Iterable, Literal, Optional
 
 from pydantic import BaseModel, StrictInt, field_validator
+
+
+def allocation_json_schema(categories: Iterable[str], description: str) -> dict:
+    """JSON Schema for a model's single-sided "my units per category" offer,
+    shared by every real-model agent. Each pool category is a required
+    integer property and no other keys are allowed: OpenAI strict structured
+    output rejects an object schema without `additionalProperties: false`,
+    and with it but no listed properties it could only ever produce `{}`.
+    Nullable (ACCEPT / WALK_AWAY) via anyOf. The schema does not bound
+    quantities: range and feasibility stay the protocol's job (no repair)."""
+    categories = list(categories)
+    return {
+        "anyOf": [
+            {
+                "type": "object",
+                "description": description,
+                "properties": {c: {"type": "integer"} for c in categories},
+                "required": categories,
+                "additionalProperties": False,
+            },
+            {"type": "null"},
+        ]
+    }
 
 
 class NegotiationAction(BaseModel):
