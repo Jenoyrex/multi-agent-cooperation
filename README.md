@@ -4,6 +4,14 @@
 currently contains the formal spec, the harness, and a zero-cost
 plumbing test — not results.**
 
+## Team
+
+College group project by:
+
+- Jenoy REX — [@Jenoyrex](https://github.com/Jenoyrex) (repository owner)
+- [@sujathaa-m](https://github.com/sujathaa-m)
+- [@4mh24cd002-stack](https://github.com/4mh24cd002-stack)
+
 ## Problem statement
 
 As LLM agents increasingly negotiate and coordinate on our behalf (see
