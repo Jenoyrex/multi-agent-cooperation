@@ -7,7 +7,7 @@ their own score. Agents are never asked to self-report metrics.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable, List
+from typing import Iterable
 
 from src.environment.allocation import compute_utility
 from src.negotiation.protocol import NegotiationRecord

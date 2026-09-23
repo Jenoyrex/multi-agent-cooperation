@@ -115,6 +115,8 @@ class NegotiationSession:
         budget: Optional[Budget] = None,
         prices: Optional[Prices] = None,
     ):
+        if state.max_rounds < 2:
+            raise ValueError("max_rounds must be >= 2 (the final turn is response-only)")
         self.agents = {"A": agent_A, "B": agent_B}
         self.state = state
         self.budget = budget
@@ -222,12 +224,7 @@ class NegotiationSession:
 
             actor = "B" if actor == "A" else "A"
 
-        # Defensive only: the final turn always terminates above, so this is
-        # unreachable with max_rounds >= 1.
-        return self._finalize(
-            transcript, outcome="timeout", num_rounds=self.state.max_rounds,
-            final_allocation=None,
-        )
+        raise AssertionError("unreachable: the final turn always terminates the session")
 
     def _finalize(
         self,

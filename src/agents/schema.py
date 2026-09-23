@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Dict, Literal, Optional
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, StrictInt, field_validator
 
 
 class NegotiationAction(BaseModel):
@@ -21,7 +21,7 @@ class NegotiationAction(BaseModel):
     # stays infeasible and is rejected by the protocol's allocation
     # validator. The protocol and storage layers only ever deal with this
     # two-sided shape.
-    allocation: Optional[Dict[str, Dict[str, int]]] = None
+    allocation: Optional[Dict[str, Dict[str, StrictInt]]] = None
     message: Optional[str] = None
 
     @field_validator("allocation")

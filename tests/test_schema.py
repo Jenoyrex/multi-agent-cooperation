@@ -27,3 +27,9 @@ def test_invalid_action_type_rejected():
 def test_message_optional():
     action = NegotiationAction(action_type="WALK_AWAY")
     assert action.message is None
+
+
+def test_quantities_are_never_coerced():
+    for bad in (3.5, 3.0, "3", True):
+        with pytest.raises(ValidationError):
+            NegotiationAction(action_type="OFFER", allocation={"A": {"w": bad}, "B": {"w": 1}})

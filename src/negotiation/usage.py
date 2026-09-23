@@ -1,11 +1,14 @@
 """Token/latency/cost accounting and the hard run budget.
 
 Prices are never hardcoded: callers supply {model_id: (usd_per_1M_input,
-usd_per_1M_output)}. A call whose model has no price, or whose provider did
-not report tokens, contributes no cost / no tokens (unknown != zero, so
-sums are None when nothing was reported). Tokens consumed by retry attempts
-that were discarded, and by calls that failed outright, are not observable
-and therefore not counted.
+usd_per_1M_output)}. Unknown is never turned into zero or a partial sum:
+a token/cost total is None if there are no calls, or if ANY call that
+completed lacks that figure (provider reported no usage, or no price for
+the model). Calls that failed outright (`error` set) and retry attempts
+that were discarded consumed tokens that are unobservable; they are
+excluded from token/cost totals (their latency and attempts are counted).
+The Budget treats unknown usage as 0 because it cannot enforce what it
+cannot see.
 """
 from __future__ import annotations
 
@@ -21,21 +24,23 @@ def call_cost(call: dict, prices: Optional[Prices]) -> Optional[float]:
     return (call["input_tokens"] * price[0] + call["output_tokens"] * price[1]) / 1_000_000
 
 
-def _sum(values: Iterable[Optional[float]]):
-    known = [v for v in values if v is not None]
-    return sum(known) if known else None
+def _total(values: Iterable[Optional[float]]):
+    """Sum, or None if there are no values or any value is unknown."""
+    values = list(values)
+    return None if not values or any(v is None for v in values) else sum(values)
 
 
 def summarize_calls(calls: Iterable[dict], prices: Optional[Prices] = None) -> dict:
     """Aggregate per-call dicts (as logged on a record) into totals."""
     calls = list(calls)
+    completed = [c for c in calls if not c.get("error")]
     return {
         "api_calls": len(calls),
         "api_attempts": sum(c.get("attempts") or 1 for c in calls),
-        "input_tokens": _sum(c.get("input_tokens") for c in calls),
-        "output_tokens": _sum(c.get("output_tokens") for c in calls),
-        "latency_s": _sum(c.get("latency_s") for c in calls),
-        "cost_usd": _sum(call_cost(c, prices) for c in calls),
+        "input_tokens": _total(c.get("input_tokens") for c in completed),
+        "output_tokens": _total(c.get("output_tokens") for c in completed),
+        "latency_s": _total(c.get("latency_s") for c in calls),
+        "cost_usd": _total(call_cost(c, prices) for c in completed),
     }
 
 
