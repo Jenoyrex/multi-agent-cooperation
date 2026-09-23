@@ -248,11 +248,17 @@ def save_aborted(
 
 def run_totals(conn: sqlite3.Connection, run_id: str) -> dict:
     """Outcome counts plus usage aggregated over completed AND aborted
-    negotiations of a run (aborted attempts still consumed tokens)."""
+    negotiations of a run (aborted attempts still consumed tokens).
+
+    Same rule as summarize_calls: a token/cost total is None if ANY row
+    (completed OR aborted) that made API calls has that figure unknown;
+    otherwise it is the sum over completed and aborted rows."""
     def usage(table: str) -> tuple:
         return conn.execute(
             f"SELECT COALESCE(SUM(api_calls),0), COALESCE(SUM(api_attempts),0), "
-            f"SUM(input_tokens), SUM(output_tokens), SUM(latency_s), SUM(cost_usd) "
+            f"SUM(input_tokens), SUM(output_tokens), SUM(latency_s), SUM(cost_usd), "
+            f"COALESCE(SUM(api_calls > 0 AND (input_tokens IS NULL OR output_tokens IS NULL)), 0), "
+            f"COALESCE(SUM(api_calls > 0 AND cost_usd IS NULL), 0) "
             f"FROM {table} WHERE run_id = ?", (run_id,)
         ).fetchone()
 
@@ -261,7 +267,13 @@ def run_totals(conn: sqlite3.Connection, run_id: str) -> dict:
 
     done, aborted = usage("negotiations"), usage("aborted_negotiations")
     keys = ["api_calls", "api_attempts", "input_tokens", "output_tokens", "latency_s", "cost_usd"]
-    totals = {k: add(d, a) for k, d, a in zip(keys, done, aborted)}
+    totals = {k: add(d, a) for k, d, a in zip(keys, done[:6], aborted[:6])}
+    unknown_tokens = done[6] or aborted[6]
+    unknown_cost = done[7] or aborted[7]
+    if unknown_tokens:
+        totals["input_tokens"] = totals["output_tokens"] = None
+    if unknown_cost:
+        totals["cost_usd"] = None
     totals["outcomes"] = dict(conn.execute(
         "SELECT outcome, COUNT(*) FROM negotiations WHERE run_id = ? GROUP BY outcome", (run_id,)
     ).fetchall())

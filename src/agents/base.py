@@ -6,7 +6,7 @@ The negotiation protocol depends only on this interface — it never checks
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Dict, List, Optional
 
 from src.agents.schema import NegotiationAction

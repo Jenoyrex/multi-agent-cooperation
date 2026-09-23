@@ -32,8 +32,10 @@ class UsageAgent(MockAgent):
     def __init__(self, model="m", **kw):
         super().__init__(**{**FAST, **kw})
         self.model = model
+        self.calls = 0
 
     async def generate_response(self, view):
+        self.calls += 1
         action = await super().generate_response(view)
         self.last_call = CallRecord(model=self.model, raw_output="{}", input_tokens=100,
                                     output_tokens=10, latency_s=0.5, attempts=1)
@@ -47,6 +49,10 @@ class FlakyAgent(MockAgent):
     def __init__(self, fail_at, **kw):
         super().__init__(**{**FAST, **kw})
         self.fail_at, self.n = fail_at, 0
+
+    @property
+    def calls(self):
+        return self.n
 
     async def generate_response(self, view):
         self.n += 1
@@ -123,8 +129,8 @@ async def test_each_run_gets_its_own_id():
 # ------------------------------------------------- transport failures
 @pytest.mark.asyncio
 async def test_transport_failure_reruns_whole_negotiation_when_configured():
-    # A's 2nd call (negotiation 0, if A moves first at index 0? A moves at
-    # turn 1 only) -> use B, which responds on turn 2 of each negotiation.
+    # A (first mover) offers on turn 1; B responds on turn 2, so B is the
+    # agent whose first call fails.
     config = cfg(num_negotiations=2, max_transport_reruns=1, first_mover_policy="A")
     records, snap = await run(config, MockAgent(**FAST), FlakyAgent(fail_at=1))
 

@@ -252,3 +252,35 @@ async def test_cannot_accept_on_first_turn():
 
     assert record.outcome == "invalid_action"
     assert record.invalid_reason == "illegal_accept"
+
+
+@pytest.mark.asyncio
+async def test_final_turn_faults_keep_their_own_invalid_reasons():
+    from src.agents.schema import InvalidAgentOutputError
+
+    class Malformed(Agent):
+        name = "malformed"
+
+        async def generate_response(self, view):
+            raise InvalidAgentOutputError("not json")
+
+    state = _build_state(seed=28, max_rounds=2)
+    first = _offer(state, 0.6)
+    cats = list(state.resource_pool)
+    over = NegotiationAction(action_type="OFFER", allocation={
+        "A": {c: q + 1 for c, q in state.resource_pool.items()}, "B": {c: 0 for c in cats}})
+    missing = NegotiationAction(action_type="OFFER", allocation={
+        "A": {c: 1 for c in cats[1:]}, "B": {c: 1 for c in cats[1:]}})
+
+    for bad, reason in ((over, "invalid_allocation"), (missing, "invalid_allocation")):
+        record = await NegotiationSession(ScriptedAgent(first), ScriptedAgent(bad), state).run()
+        assert (record.outcome, record.invalid_reason) == ("invalid_action", reason)
+    record = await NegotiationSession(ScriptedAgent(first), Malformed(), state).run()
+    assert (record.outcome, record.invalid_reason) == ("invalid_action", "malformed_output")
+
+
+def test_session_rejects_degenerate_horizon():
+    import dataclasses
+    state = dataclasses.replace(_build_state(seed=29), max_rounds=1)
+    with pytest.raises(ValueError, match="max_rounds"):
+        NegotiationSession(MockAgent(), MockAgent(), state)

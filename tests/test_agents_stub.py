@@ -12,9 +12,9 @@ import pytest
 from src.agents.claude_agent import ClaudeAgent
 from src.agents.generation import ConfigError, GenerationConfig
 from src.agents.openai_agent import OpenAIAgent
-from src.agents.schema import InvalidAgentOutputError, TransportError
+from src.agents.schema import TransportError
 from src.negotiation.protocol import NegotiationSession
-from tests.test_protocol import AlwaysWalkAwayAgent, _build_state
+from tests.test_protocol import AlwaysWalkAwayAgent, ScriptedAgent, _build_state, _offer
 
 CFG = GenerationConfig(model="stub-model", temperature=0.3, max_output_tokens=321,
                        timeout_s=12.5, max_retries=2, retry_backoff_s=0)
@@ -34,14 +34,16 @@ def claude_resp(tool_input=None, text=None, stop_reason="tool_use", usage=(100, 
     if text:
         content.append(SimpleNamespace(type="text", text=text))
     return SimpleNamespace(content=content, stop_reason=stop_reason, model="claude-returned",
-                           usage=SimpleNamespace(input_tokens=usage[0], output_tokens=usage[1]))
+                           usage=SimpleNamespace(input_tokens=usage[0], output_tokens=usage[1])
+                           if usage else None)
 
 
 def openai_resp(content=None, refusal=None, finish_reason="stop", usage=(100, 20)):
     msg = SimpleNamespace(content=content, refusal=refusal)
     return SimpleNamespace(choices=[SimpleNamespace(message=msg, finish_reason=finish_reason)],
                            model="gpt-returned",
-                           usage=SimpleNamespace(prompt_tokens=usage[0], completion_tokens=usage[1]))
+                           usage=SimpleNamespace(prompt_tokens=usage[0], completion_tokens=usage[1])
+                           if usage else None)
 
 
 class StubClient:
@@ -270,3 +272,29 @@ def _view():
     state = _build_state(seed=31)
     return AgentView(role="A", resource_pool=state.resource_pool, own_valuation=state.valuation_A,
                      transcript_so_far=[], round_number=1, rounds_remaining=2, max_rounds=3)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", KINDS)
+async def test_valid_accept_of_standing_offer_agrees(kind):
+    state = _build_state(seed=31, max_rounds=4)  # A (scripted) offers first, real agent is B
+    offer = _offer(state, 0.6)
+    agent, _ = make_agent(kind, wrap(kind, {"action_type": "ACCEPT", "message": "deal"}))
+
+    record = await NegotiationSession(ScriptedAgent(offer), agent, state).run()
+
+    assert record.outcome == "agreed" and record.invalid_reason is None
+    assert record.final_allocation == offer.allocation
+    assert record.calls[0]["actor"] == "B" and record.calls[0]["input_tokens"] == 100
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", KINDS)
+async def test_missing_usage_metadata_stays_unknown_not_zero(kind):
+    agent, _ = make_agent(kind, wrap(kind, {"action_type": "WALK_AWAY"}, usage=None))
+    record, _ = await run_first_turn(agent)
+
+    call = record.calls[0]
+    assert call["input_tokens"] is None and call["output_tokens"] is None
+    assert record.input_tokens is None and record.output_tokens is None and record.cost_usd is None
+    assert record.api_calls == 1 and call["latency_s"] is not None
