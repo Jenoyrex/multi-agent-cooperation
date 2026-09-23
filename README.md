@@ -8,7 +8,7 @@ plumbing test — not results.**
 
 College group project by:
 
-- Jenoy REX — [@Jenoyrex](https://github.com/Jenoyrex) (repository owner)
+- [@Jenoyrex](https://github.com/Jenoyrex) 
 - [@sujathaa-m](https://github.com/sujathaa-m)
 - [@4mh24cd002-stack](https://github.com/4mh24cd002-stack)
 
