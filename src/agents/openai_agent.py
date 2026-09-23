@@ -13,7 +13,7 @@ import json
 from src.agents.base import Agent, AgentView, CallRecord
 from src.agents.generation import GenerationConfig, call_with_retries
 from src.agents.parsing import parse_action
-from src.agents.prompting import build_prompt, system_instructions
+from src.agents.prompting import BASELINE_VARIANT, build_prompt, check_variant, system_instructions
 from src.agents.schema import InvalidAgentOutputError, NegotiationAction, TransportError, allocation_json_schema
 from src.environment.resources import DEFAULT_CATEGORY_NAMES
 
@@ -47,10 +47,13 @@ RESPONSE_SCHEMA = response_schema(DEFAULT_CATEGORY_NAMES)
 
 
 class OpenAIAgent(Agent):
-    def __init__(self, config: GenerationConfig, name: str | None = None, client=None):
+    def __init__(self, config: GenerationConfig, name: str | None = None, client=None,
+                 instructions_variant: str = BASELINE_VARIANT):
         self.config = config
         self.name = name or f"openai:{config.model}"
         self._client = client  # injectable for stub-client tests
+        # Which instruction strategy this agent sends; recorded in run config.
+        self.instructions_variant = check_variant(instructions_variant)
 
     def _get_client(self):
         if self._client is None:
@@ -69,7 +72,7 @@ class OpenAIAgent(Agent):
             temperature=cfg.temperature,
             max_completion_tokens=cfg.max_output_tokens,
             messages=[
-                {"role": "system", "content": system_instructions(view)},
+                {"role": "system", "content": system_instructions(view, self.instructions_variant)},
                 {"role": "user", "content": build_prompt(view)},
             ],
             response_format={"type": "json_schema", "json_schema": response_schema(view.resource_pool)},

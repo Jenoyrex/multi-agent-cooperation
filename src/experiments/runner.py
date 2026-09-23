@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from src.agents.base import Agent
+from src.agents.prompting import BASELINE_VARIANT, INSTRUCTION_VARIANTS
 from src.environment.optimum import compute_optimal_welfare
 from src.environment.resources import generate_resource_pool
 from src.environment.valuations import generate_valuation
@@ -96,6 +97,27 @@ def build_run_metadata(
     }
 
 
+def check_condition_label(config: ExperimentConfig, agents: List[Agent]) -> None:
+    """The run's condition label (config.method) must match the instructions
+    each agent actually sends, so a run can never be labelled structured_v1
+    while sending the baseline prompt (or vice versa). A prompt-sending agent
+    is accepted only if the label names its variant, or if it sends the
+    baseline under a label that names no variant (legacy labels such as
+    "baseline_plain_prompting"). Mock agents send no prompt and are skipped."""
+    for role, agent in zip("AB", agents):
+        variant = getattr(agent, "instructions_variant", None)
+        if variant is None:
+            continue
+        if config.method == variant:
+            continue
+        if variant == BASELINE_VARIANT and config.method not in INSTRUCTION_VARIANTS:
+            continue
+        raise ValueError(
+            f"Condition label {config.method!r} does not match agent {role} "
+            f"({agent.name}), which sends instruction variant {variant!r}."
+        )
+
+
 def _make_budget(config: ExperimentConfig, agents: List[Agent], prices: Optional[Prices]) -> Optional[Budget]:
     if config.budget_max_total_tokens is None and config.budget_max_cost_usd is None:
         return None
@@ -125,6 +147,7 @@ async def run_batch(
     If reruns are exhausted the negotiation is simply absent from
     `negotiations` and the run finishes as 'incomplete'. A budget stop ends
     the whole run as 'budget_exhausted'."""
+    check_condition_label(config, [agent_A, agent_B])
     gen_configs = {"A": agent_A.config, "B": agent_B.config}
     if config.mode == "full" and not confirmed_full_run:
         print("=== FULL EXPERIMENT — COST ESTIMATE (approval required) ===")

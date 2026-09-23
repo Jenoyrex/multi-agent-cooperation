@@ -13,7 +13,7 @@ import json
 from src.agents.base import Agent, AgentView, CallRecord
 from src.agents.generation import GenerationConfig, call_with_retries
 from src.agents.parsing import parse_action
-from src.agents.prompting import build_prompt, system_instructions
+from src.agents.prompting import BASELINE_VARIANT, build_prompt, check_variant, system_instructions
 from src.agents.schema import InvalidAgentOutputError, NegotiationAction, TransportError, allocation_json_schema
 from src.environment.resources import DEFAULT_CATEGORY_NAMES
 
@@ -46,10 +46,13 @@ ACTION_TOOL = action_tool(DEFAULT_CATEGORY_NAMES)
 
 
 class ClaudeAgent(Agent):
-    def __init__(self, config: GenerationConfig, name: str | None = None, client=None):
+    def __init__(self, config: GenerationConfig, name: str | None = None, client=None,
+                 instructions_variant: str = BASELINE_VARIANT):
         self.config = config
         self.name = name or f"claude:{config.model}"
         self._client = client  # injectable for stub-client tests
+        # Which instruction strategy this agent sends; recorded in run config.
+        self.instructions_variant = check_variant(instructions_variant)
 
     def _get_client(self):
         if self._client is None:
@@ -67,7 +70,7 @@ class ClaudeAgent(Agent):
             model=cfg.model,
             max_tokens=cfg.max_output_tokens,
             temperature=cfg.temperature,
-            system=system_instructions(view),
+            system=system_instructions(view, self.instructions_variant),
             messages=[{"role": "user", "content": build_prompt(view)}],
             tools=[action_tool(view.resource_pool)],
             tool_choice={"type": "tool", "name": "submit_negotiation_action"},
