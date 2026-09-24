@@ -14,7 +14,7 @@ from src.environment.optimum import compute_optimal_welfare
 from src.environment.resources import generate_resource_pool
 from src.environment.valuations import generate_valuation
 from src.experiments import provenance
-from src.experiments.config import ExperimentConfig, estimate_cost
+from src.experiments.config import ExperimentConfig, check_approved_runtime, estimate_cost
 from src.negotiation.protocol import EvaluatorState, NegotiationAborted, NegotiationRecord, NegotiationSession
 from src.negotiation.usage import Budget, Prices
 from src.storage.db import finish_run, get_connection, run_totals, save_aborted, save_record, save_run
@@ -93,6 +93,8 @@ def build_run_metadata(
             "environment": provenance.environment_params(config.num_categories),
             "agents": {"A": _describe_agent(agent_A), "B": _describe_agent(agent_B)},
             "prices_usd_per_million_tokens": prices,
+            # True iff check_approved_runtime was enforced (pilot/full modes).
+            "approved_runtime_enforced": config.mode in ("pilot", "full"),
         },
     }
 
@@ -148,7 +150,9 @@ async def run_batch(
     `negotiations` and the run finishes as 'incomplete'. A budget stop ends
     the whole run as 'budget_exhausted'."""
     check_condition_label(config, [agent_A, agent_B])
-    gen_configs = {"A": agent_A.config, "B": agent_B.config}
+    if config.mode in ("pilot", "full"):
+        check_approved_runtime(config, [agent_A, agent_B])
+    gen_configs ={"A": agent_A.config, "B": agent_B.config}
     if config.mode == "full" and not confirmed_full_run:
         print("=== FULL EXPERIMENT — COST ESTIMATE (approval required) ===")
         for k, v in estimate_cost(config, gen_configs, prices).items():

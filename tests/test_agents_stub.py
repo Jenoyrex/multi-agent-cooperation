@@ -205,8 +205,99 @@ async def test_generation_settings_are_sent_explicitly(kind):
     await run_first_turn(agent)
     sent = client.calls[0]
     assert sent["model"] == "stub-model"
-    assert sent["temperature"] == 0.3
+    # anthropic SDK 1.x has no typed `temperature` argument; it goes in extra_body.
+    temperature = sent["extra_body"]["temperature"] if kind == "claude" else sent["temperature"]
+    assert temperature == 0.3
     assert sent["max_tokens" if kind == "claude" else "max_completion_tokens"] == 321
+
+
+# ------------------------------------------- frozen runtime settings (§8.15)
+EFFORT_CFG = GenerationConfig(model="stub-model", temperature=1.0, max_output_tokens=1024,
+                              timeout_s=120, max_retries=3, retry_backoff_s=0, effort="medium")
+
+
+@pytest.mark.asyncio
+async def test_claude_sends_thinking_disabled_effort_and_no_seed():
+    client = StubClient(claude_resp(tool_input={"action_type": "WALK_AWAY"}))
+    await run_first_turn(ClaudeAgent(EFFORT_CFG, client=client))
+    sent = client.calls[0]
+    assert sent["thinking"] == {"type": "disabled"}
+    assert sent["output_config"] == {"effort": "medium"}
+    assert sent["extra_body"] == {"temperature": 1.0}
+    assert "seed" not in sent and "temperature" not in sent
+
+
+@pytest.mark.asyncio
+async def test_claude_sends_no_effort_when_unset():
+    client = StubClient(claude_resp(tool_input={"action_type": "WALK_AWAY"}))
+    await run_first_turn(ClaudeAgent(CFG, client=client))
+    assert "output_config" not in client.calls[0]
+
+
+@pytest.mark.asyncio
+async def test_openai_sends_no_reasoning_effort_and_no_seed():
+    client = StubClient(openai_resp(content=json.dumps({"action_type": "WALK_AWAY"})))
+    await run_first_turn(OpenAIAgent(CFG, client=client))
+    sent = client.calls[0]
+    assert "reasoning_effort" not in sent and "seed" not in sent
+
+
+def test_openai_agent_rejects_effort():
+    with pytest.raises(ConfigError, match="effort"):
+        OpenAIAgent(EFFORT_CFG, client=StubClient())
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", KINDS)
+async def test_sent_kwargs_match_installed_sdk_signature(kind):
+    """The stub accepts any kwargs, so bind what each agent sends against the
+    real installed SDK method (no network): an argument the pinned SDK does
+    not accept would otherwise only fail on the first real API call."""
+    import inspect
+    walk = {"action_type": "WALK_AWAY"}
+    if kind == "claude":
+        from anthropic.resources.messages import AsyncMessages as Resource
+        client = StubClient(claude_resp(tool_input=walk))
+        agent = ClaudeAgent(EFFORT_CFG, client=client)
+    else:
+        from openai.resources.chat.completions import AsyncCompletions as Resource
+        client = StubClient(openai_resp(content=json.dumps(walk)))
+        agent = OpenAIAgent(CFG, client=client)
+    await run_first_turn(agent)
+    inspect.signature(Resource.create).bind(None, **client.calls[0])  # TypeError if not accepted
+
+
+@pytest.mark.asyncio
+async def test_claude_temperature_serialized_by_installed_sdk():
+    """Real anthropic client over an in-process mock transport (no network):
+    the SDK itself builds and serializes the request, and the JSON body it
+    would send carries temperature = 1.0 as a top-level field."""
+    import anthropic
+    import httpx2
+
+    sent = []
+
+    def handler(request):
+        sent.append(request)
+        return httpx2.Response(200, json={
+            "id": "msg_test", "type": "message", "role": "assistant", "model": "claude-sonnet-4-6",
+            "content": [{"type": "tool_use", "id": "toolu_test", "name": "submit_negotiation_action",
+                         "input": {"action_type": "WALK_AWAY"}}],
+            "stop_reason": "tool_use", "stop_sequence": None,
+            "usage": {"input_tokens": 10, "output_tokens": 5},
+        })
+
+    client = anthropic.AsyncAnthropic(
+        api_key="test-key-not-used", max_retries=0,
+        http_client=httpx2.AsyncClient(transport=httpx2.MockTransport(handler)))
+    record, _ = await run_first_turn(ClaudeAgent(EFFORT_CFG, client=client))
+
+    assert record.outcome == "walked_away"
+    (request,) = sent
+    assert request.method == "POST" and request.url.path == "/v1/messages"
+    body = json.loads(request.content)
+    assert body["temperature"] == 1.0          # top level of the Messages request body
+    assert "extra_body" not in body            # merged by the SDK, not nested
 
 
 def test_generation_config_from_env():
@@ -220,6 +311,23 @@ def test_generation_config_from_env():
             GenerationConfig.from_env("X", {k: v for k, v in env.items() if k != missing})
     with pytest.raises(ConfigError):
         GenerationConfig.from_env("X", {**env, "X_TEMPERATURE": "hot"})
+    assert cfg.effort is None  # optional; unset = not sent
+    assert GenerationConfig.from_env("X", {**env, "X_EFFORT": "medium"}).effort == "medium"
+    with pytest.raises(ConfigError, match="effort"):
+        GenerationConfig.from_env("X", {**env, "X_EFFORT": "extreme"})
+
+
+def test_env_example_matches_approved_runtime():
+    """.env.example documents exactly the frozen values (spec §8.15)."""
+    from pathlib import Path
+    from dotenv import dotenv_values
+    from src.experiments.config import APPROVED_OPERATIONAL, APPROVED_SCIENTIFIC
+
+    env = dotenv_values(Path(__file__).resolve().parents[1] / ".env.example")
+    for prefix, kind in (("CLAUDE", "ClaudeAgent"), ("OPENAI", "OpenAIAgent")):
+        cfg = GenerationConfig.from_env(prefix, env)
+        for field, want in {**APPROVED_SCIENTIFIC[kind], **APPROVED_OPERATIONAL}.items():
+            assert getattr(cfg, field) == want, (prefix, field)
 
 
 # ------------------------------------------------------------ retries

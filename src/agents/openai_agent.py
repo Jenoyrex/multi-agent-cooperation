@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 
 from src.agents.base import Agent, AgentView, CallRecord
-from src.agents.generation import GenerationConfig, call_with_retries
+from src.agents.generation import ConfigError, GenerationConfig, call_with_retries
 from src.agents.parsing import parse_action
 from src.agents.prompting import BASELINE_VARIANT, build_prompt, check_variant, system_instructions
 from src.agents.schema import InvalidAgentOutputError, NegotiationAction, TransportError, allocation_json_schema
@@ -54,6 +54,10 @@ class OpenAIAgent(Agent):
         self._client = client  # injectable for stub-client tests
         # Which instruction strategy this agent sends; recorded in run config.
         self.instructions_variant = check_variant(instructions_variant)
+        # Non-reasoning model: no reasoning_effort is ever sent (spec §8.15).
+        if config.effort is not None:
+            raise ConfigError("OpenAIAgent sends no reasoning effort; effort must be None")
+        self.api_seed = None  # no `seed` is sent
 
     def _get_client(self):
         if self._client is None:

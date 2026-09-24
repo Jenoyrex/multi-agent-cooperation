@@ -26,6 +26,51 @@ Mode = Literal["smoke", "pilot", "full"]
 # (system prompt + a transcript that grows over the negotiation).
 ASSUMED_INPUT_TOKENS_PER_CALL = 1500
 
+# ---- Frozen runtime configuration (docs/spec.md §8.15) -------------------
+# Enforced for every pilot/full run by check_approved_runtime.
+#
+# Scientific: shapes model behavior, so it is part of the preregistration.
+APPROVED_SCIENTIFIC = {
+    "ClaudeAgent": {"model": "claude-sonnet-4-6", "temperature": 1.0,
+                    "max_output_tokens": 1024, "effort": "medium"},
+    "OpenAIAgent": {"model": "gpt-4.1-2025-04-14", "temperature": 1.0,
+                    "max_output_tokens": 1024, "effort": None},
+}
+APPROVED_CLAUDE_THINKING = "disabled"
+APPROVED_MAX_ROUNDS = 10
+# Operational: affects only infrastructure failures, never strategic outcomes.
+APPROVED_OPERATIONAL = {"timeout_s": 120.0, "max_retries": 3, "retry_backoff_s": 2.0}
+APPROVED_MAX_TRANSPORT_RERUNS = 2
+
+
+def check_approved_runtime(config: "ExperimentConfig", agents) -> None:
+    """Raise ValueError unless the run uses exactly the frozen runtime
+    configuration: one Claude and one OpenAI agent with the approved
+    generation settings, and the approved round limit and rerun count."""
+    problems = []
+    if config.max_rounds != APPROVED_MAX_ROUNDS:
+        problems.append(f"max_rounds={config.max_rounds} (approved {APPROVED_MAX_ROUNDS})")
+    if config.max_transport_reruns != APPROVED_MAX_TRANSPORT_RERUNS:
+        problems.append(f"max_transport_reruns={config.max_transport_reruns} "
+                        f"(approved {APPROVED_MAX_TRANSPORT_RERUNS})")
+    kinds = sorted(type(a).__name__ for a in agents)
+    if kinds != sorted(APPROVED_SCIENTIFIC):
+        problems.append(f"agents {kinds} (approved one ClaudeAgent and one OpenAIAgent)")
+    for agent in agents:
+        approved = APPROVED_SCIENTIFIC.get(type(agent).__name__)
+        if approved is None:
+            continue
+        for field, want in {**approved, **APPROVED_OPERATIONAL}.items():
+            got = getattr(agent.config, field)
+            if got != want:
+                problems.append(f"{agent.name}: {field}={got!r} (approved {want!r})")
+        if type(agent).__name__ == "ClaudeAgent" and agent.thinking != APPROVED_CLAUDE_THINKING:
+            problems.append(f"{agent.name}: thinking={agent.thinking!r} "
+                            f"(approved {APPROVED_CLAUDE_THINKING!r})")
+    if problems:
+        raise ValueError(f"{config.mode} run does not match the approved runtime "
+                         f"configuration: " + "; ".join(problems))
+
 
 @dataclass(frozen=True)
 class ExperimentConfig:

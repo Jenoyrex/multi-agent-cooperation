@@ -53,6 +53,9 @@ class ClaudeAgent(Agent):
         self._client = client  # injectable for stub-client tests
         # Which instruction strategy this agent sends; recorded in run config.
         self.instructions_variant = check_variant(instructions_variant)
+        # Sent explicitly on every call and recorded in run config (spec §8.15).
+        self.thinking = "disabled"
+        self.api_seed = None  # the Messages API has no seed parameter
 
     def _get_client(self):
         if self._client is None:
@@ -69,12 +72,17 @@ class ClaudeAgent(Agent):
         kwargs = dict(
             model=cfg.model,
             max_tokens=cfg.max_output_tokens,
-            temperature=cfg.temperature,
+            # anthropic SDK 1.x dropped the typed `temperature` argument; the
+            # API still accepts it on claude-sonnet-4-6 with thinking off.
+            extra_body={"temperature": cfg.temperature},
+            thinking={"type": self.thinking},
             system=system_instructions(view, self.instructions_variant),
             messages=[{"role": "user", "content": build_prompt(view)}],
             tools=[action_tool(view.resource_pool)],
             tool_choice={"type": "tool", "name": "submit_negotiation_action"},
         )
+        if cfg.effort is not None:
+            kwargs["output_config"] = {"effort": cfg.effort}
         try:
             response, attempts, latency = await call_with_retries(
                 lambda: client.messages.create(**kwargs), cfg

@@ -69,7 +69,7 @@ async def test_no_rerun_when_not_configured():
 @pytest.mark.asyncio
 async def test_budget_is_checked_before_each_call():
     a, b = UsageAgent(), UsageAgent()  # 110 tokens per call
-    _, snap = await run(cfg(mode="pilot", num_negotiations=3, budget_max_total_tokens=100,
+    _, snap = await run(cfg(mode="smoke", num_negotiations=3, budget_max_total_tokens=100,
                             first_mover_policy="A"), a, b)
 
     # After A's first call (110 >= 100) B's call must never start.

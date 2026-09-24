@@ -14,7 +14,8 @@ ROOT = Path(__file__).resolve().parents[2]
 
 # Identifies the frozen negotiation semantics (docs/spec.md §3).
 PROTOCOL_ID = "alternating-offers/final-turn-deadline/v1"
-DEPENDENCIES = ["pydantic", "anthropic", "openai", "python-dotenv", "pandas", "matplotlib"]
+# httpx2 is the HTTP transport of both provider SDKs.
+DEPENDENCIES = ["pydantic", "anthropic", "openai", "httpx2", "python-dotenv", "pandas", "matplotlib"]
 
 
 def _sha256(*chunks: bytes) -> str:

@@ -424,8 +424,9 @@ split value equally, fairly, or equitably.
 - **Total full-run negotiations:** 60 × 8 = **480**.
 
 The design uses one fixed Claude model and one fixed GPT model. Their exact
-model ids and all generation settings are recorded in each run's provenance
-(§3.7). They are identical in every cell and in both conditions.
+model ids and generation settings are fixed in §8.15, are recorded in each
+run's provenance (§3.7), and are identical in every cell and in both
+conditions.
 
 ### 8.4 Pilot design
 
@@ -729,3 +730,47 @@ All of the following were fixed before any full-run negotiation was run:
     and are never outcomes. There are no strategic retries.
 12. The invalid-action sensitivity analysis as specified in §8.11.
 13. No exclusion rules beyond those stated in this section.
+14. The runtime configuration in §8.15, fixed before the first pilot API
+    call and identical for the pilot and the full run.
+
+### 8.15 Runtime configuration
+
+Fixed before the first pilot API call. The pilot and the full run use exactly
+these values. Every pilot and full run is checked against them before any
+API call (`check_approved_runtime` in `src/experiments/config.py`) and
+refuses to start if any value differs.
+
+**Scientific configuration.** These settings shape model behavior and are
+part of the preregistration.
+
+| Setting | Claude | OpenAI |
+|---|---|---|
+| Model | `claude-sonnet-4-6` (pinned snapshot) | `gpt-4.1-2025-04-14` (pinned snapshot, non-reasoning) |
+| Temperature | 1.0 | 1.0 |
+| Max output tokens | 1024 (`max_tokens`) | 1024 (`max_completion_tokens`) |
+| Thinking / reasoning | Thinking off, sent explicitly as `thinking: {type: "disabled"}` | None: non-reasoning model, no `reasoning_effort` sent |
+| Effort | `medium` (`output_config.effort`) | Not applicable |
+| API seed | None: the Messages API has no seed parameter | None: no `seed` is sent |
+
+Both conditions and both seats use the same values. `MAX_ROUNDS` = 10 for
+every pilot and full-run negotiation.
+
+No API-level seed is sent to either provider, so model outputs are not
+deterministic (§8.12, LLM stochasticity). Instance generation stays fully
+deterministic (§8.10).
+
+**Operational configuration.** These settings affect only infrastructure
+failures (§3.6, §8.11) and never a strategic outcome.
+
+| Setting | Claude | OpenAI |
+|---|---|---|
+| Request timeout | 120 s | 120 s |
+| Max in-turn retries | 3 | 3 |
+| Retry backoff | 2.0 s (waits of 2, 4, 8 s) | 2.0 s (waits of 2, 4, 8 s) |
+
+`max_transport_reruns` = 2: a negotiation aborted by a transport failure is
+re-run cleanly from turn 1 up to twice (§8.11).
+
+**Software.** The provider SDKs are pinned to `anthropic==1.8.0` and
+`openai==3.19.2` in `pyproject.toml`. Dependency versions, including the
+SDKs and their HTTP transport, are recorded with every run (§3.7).
