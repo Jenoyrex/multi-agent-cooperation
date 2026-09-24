@@ -35,6 +35,23 @@ def social_welfare_efficiency(record: NegotiationRecord) -> float | None:
     return record.total_welfare / record.optimal_welfare
 
 
+def relative_welfare_efficiency(record: NegotiationRecord) -> float:
+    """spec §8.6, confirmatory. Unconditional: SW / optimal_welfare for an
+    agreed negotiation with a valid allocation, 0 for every failure
+    (walked_away, timeout, invalid_action)."""
+    swe = social_welfare_efficiency(record)
+    return 0.0 if swe is None else swe
+
+
+def egalitarian_welfare(record: NegotiationRecord, total_points: float = 100.0) -> float:
+    """spec §8.6, confirmatory. Unconditional: min(utility_A, utility_B) /
+    100 for an agreed negotiation with a valid allocation, 0 for every
+    failure."""
+    if not has_valid_allocation(record):
+        return 0.0
+    return min(record.utility_A, record.utility_B) / total_points
+
+
 def equitability(record: NegotiationRecord, total_points: float = 100.0) -> float | None:
     """spec §5.3. 1.0 = perfectly equitable, 0.0 = maximally unequal.
     None if there is no valid allocation."""
@@ -43,6 +60,37 @@ def equitability(record: NegotiationRecord, total_points: float = 100.0) -> floa
     norm_a = record.utility_A / total_points
     norm_b = record.utility_B / total_points
     return 1.0 - abs(norm_a - norm_b)
+
+
+def _utility_of_seat(record: NegotiationRecord, seat: str) -> float:
+    return {"A": record.utility_A, "B": record.utility_B}[seat]
+
+
+def model_imbalance(record: NegotiationRecord, model_x: str, model_y: str,
+                    total_points: float = 100.0) -> float | None:
+    """spec §8.6 diagnostic: u_x/100 - u_y/100 by MODEL, whichever seat each
+    occupies. For the preregistered design pass (claude_name, gpt_name) to
+    get u_Claude/100 - u_GPT/100. None if there is no valid allocation."""
+    seats = {record.model_A: "A", record.model_B: "B"}
+    if record.model_A == record.model_B or set(seats) != {model_x, model_y}:
+        raise ValueError(f"Models {model_x!r}/{model_y!r} do not match the record's seats "
+                         f"A={record.model_A!r}, B={record.model_B!r}")
+    if not has_valid_allocation(record):
+        return None
+    return (_utility_of_seat(record, seats[model_x])
+            - _utility_of_seat(record, seats[model_y])) / total_points
+
+
+def first_mover_gap(record: NegotiationRecord, total_points: float = 100.0) -> float | None:
+    """spec §8.6 diagnostic: u_first/100 - u_second/100, with first/second
+    taken from record.first_mover. None if there is no valid allocation."""
+    if record.first_mover not in ("A", "B"):
+        raise ValueError(f"Unknown first_mover {record.first_mover!r}")
+    if not has_valid_allocation(record):
+        return None
+    second = "B" if record.first_mover == "A" else "A"
+    return (_utility_of_seat(record, record.first_mover)
+            - _utility_of_seat(record, second)) / total_points
 
 
 @dataclass(frozen=True)
@@ -82,6 +130,10 @@ class BatchMetrics:
     timeout_rate: float
     invalid_action_rate: float
     mean_rounds_to_agreement: float | None  # None if no agreements at all
+    # Unconditional confirmatory metrics (spec §8.6): mean over ALL n,
+    # failures count as 0.
+    mean_rwe: float
+    mean_egalitarian_welfare: float
     # Allocation-dependent metrics: averaged over AGREED negotiations only,
     # None if there are none. The four outcome rates above use all n.
     mean_social_welfare: float | None
@@ -125,6 +177,8 @@ def summarize_batch(records: Iterable[NegotiationRecord]) -> BatchMetrics:
         mean_rounds_to_agreement=(
             sum(r.num_rounds for r in agreed) / len(agreed) if agreed else None
         ),
+        mean_rwe=mean([relative_welfare_efficiency(r) for r in records]),
+        mean_egalitarian_welfare=mean([egalitarian_welfare(r) for r in records]),
         mean_social_welfare=mean([social_welfare(r) for r in agreed]),
         mean_swe=mean([social_welfare_efficiency(r) for r in agreed]),
         mean_equitability=mean([equitability(r) for r in agreed]),
