@@ -192,7 +192,7 @@ async def test_mock_runs_have_null_usage_not_zero():
 async def test_token_budget_is_a_hard_stop_and_recorded_separately():
     # Each call = 110 tokens; a negotiation = 2 calls (220). Cap 250: the
     # 1st negotiation completes, the 2nd is stopped before its 2nd call.
-    config = cfg(mode="pilot", num_negotiations=3, budget_max_total_tokens=250)
+    config = cfg(mode="smoke", num_negotiations=3, budget_max_total_tokens=250)
     records, snap = await run(config, UsageAgent(), UsageAgent())
 
     assert snap["runs"][0]["status"] == "budget_exhausted"
@@ -209,10 +209,10 @@ async def test_cost_budget_requires_prices_and_stops():
     a = UsageAgent()
     a.config = gen
     with pytest.raises(ValueError, match="prices"):
-        await run(cfg(mode="pilot", budget_max_cost_usd=0.001), a, UsageAgent())
+        await run(cfg(mode="smoke", budget_max_cost_usd=0.001), a, UsageAgent())
 
     prices = {"m": (1000.0, 1000.0)}  # 110 tokens = $0.11 per call
-    config = cfg(mode="pilot", num_negotiations=3, budget_max_cost_usd=0.15)
+    config = cfg(mode="smoke", num_negotiations=3, budget_max_cost_usd=0.15)
     _, snap = await run(config, a, UsageAgent(), prices=prices)
     assert snap["runs"][0]["status"] == "budget_exhausted"
     assert snap["aborted"][0]["reason"] == "budget_exhausted"
@@ -253,3 +253,123 @@ def test_estimate_uses_max_output_tokens_prices_and_observed_usage():
 
     est = estimate_cost(config)  # nothing known about outputs
     assert est["estimated_output_tokens_upper_bound"] is None
+
+
+# ------------------------------------ frozen runtime configuration (§8.15)
+from src.agents.claude_agent import ClaudeAgent
+from src.agents.openai_agent import OpenAIAgent
+from src.experiments.config import (APPROVED_MAX_ROUNDS, APPROVED_MAX_TRANSPORT_RERUNS,
+                                    APPROVED_OPERATIONAL, APPROVED_SCIENTIFIC, check_approved_runtime)
+from tests.test_agents_stub import StubClient, claude_resp, openai_resp
+
+WALK = {"action_type": "WALK_AWAY", "message": "bye"}
+
+
+def approved_gen(kind, **override):
+    return GenerationConfig(**{**APPROVED_SCIENTIFIC[kind], **APPROVED_OPERATIONAL, **override})
+
+
+def approved_agents(claude_over=None, openai_over=None, n=4):
+    claude = ClaudeAgent(approved_gen("ClaudeAgent", **(claude_over or {})),
+                         client=StubClient(*[claude_resp(tool_input=WALK) for _ in range(n)]))
+    gpt = OpenAIAgent(approved_gen("OpenAIAgent", **(openai_over or {})),
+                      client=StubClient(*[openai_resp(content=json.dumps(WALK)) for _ in range(n)]))
+    return claude, gpt
+
+
+def approved_cfg(**kw):
+    return cfg(**{"mode": "pilot", "num_negotiations": 3, "max_rounds": APPROVED_MAX_ROUNDS,
+                  "max_transport_reruns": APPROVED_MAX_TRANSPORT_RERUNS,
+                  "budget_max_total_tokens": 100_000, **kw})
+
+
+def test_approved_values_are_the_preregistered_ones():
+    assert APPROVED_SCIENTIFIC == {
+        "ClaudeAgent": {"model": "claude-sonnet-4-6", "temperature": 1.0,
+                        "max_output_tokens": 1024, "effort": "medium"},
+        "OpenAIAgent": {"model": "gpt-4.1-2025-04-14", "temperature": 1.0,
+                        "max_output_tokens": 1024, "effort": None},
+    }
+    assert APPROVED_OPERATIONAL == {"timeout_s": 120.0, "max_retries": 3, "retry_backoff_s": 2.0}
+    assert (APPROVED_MAX_ROUNDS, APPROVED_MAX_TRANSPORT_RERUNS) == (10, 2)
+
+
+def test_approved_runtime_accepts_both_seat_orders():
+    claude, gpt = approved_agents()
+    check_approved_runtime(approved_cfg(), [claude, gpt])
+    check_approved_runtime(approved_cfg(), [gpt, claude])
+
+
+@pytest.mark.parametrize("claude_over,openai_over,match", [
+    ({"model": "claude-sonnet-5"}, None, "model"),
+    ({"temperature": 0.5}, None, "temperature"),
+    ({"max_output_tokens": 2048}, None, "max_output_tokens"),
+    ({"effort": "high"}, None, "effort"),
+    ({"effort": None}, None, "effort"),
+    ({"timeout_s": 60.0}, None, "timeout_s"),
+    ({"max_retries": 1}, None, "max_retries"),
+    ({"retry_backoff_s": 1.0}, None, "retry_backoff_s"),
+    (None, {"model": "gpt-4.1"}, "model"),  # the alias, not the pinned snapshot
+    (None, {"temperature": 0.0}, "temperature"),
+    (None, {"max_output_tokens": 512}, "max_output_tokens"),
+])
+def test_approved_runtime_rejects_any_deviating_generation_setting(claude_over, openai_over, match):
+    claude, gpt = approved_agents(claude_over, openai_over)
+    with pytest.raises(ValueError, match=match):
+        check_approved_runtime(approved_cfg(), [claude, gpt])
+
+
+@pytest.mark.parametrize("over,match", [
+    ({"max_rounds": 8}, "max_rounds"),
+    ({"max_transport_reruns": 0}, "max_transport_reruns"),
+])
+def test_approved_runtime_rejects_other_round_limit_or_reruns(over, match):
+    with pytest.raises(ValueError, match=match):
+        check_approved_runtime(approved_cfg(**over), list(approved_agents()))
+
+
+def test_approved_runtime_rejects_thinking_on_and_wrong_pairing():
+    claude, gpt = approved_agents()
+    claude.thinking = "adaptive"
+    with pytest.raises(ValueError, match="thinking"):
+        check_approved_runtime(approved_cfg(), [claude, gpt])
+    claude2, _ = approved_agents()
+    with pytest.raises(ValueError, match="agents"):
+        check_approved_runtime(approved_cfg(), [claude2, approved_agents()[0]])
+    with pytest.raises(ValueError, match="agents"):
+        check_approved_runtime(approved_cfg(), [MockAgent(**FAST), gpt])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["pilot", "full"])
+async def test_pilot_and_full_runs_refuse_unapproved_runtime_before_any_call(mode):
+    a, b = UsageAgent(), UsageAgent()
+    with pytest.raises(ValueError, match="approved runtime"):
+        await run(approved_cfg(mode=mode), a, b, confirmed_full_run=True)
+    assert (a.calls, b.calls) == (0, 0)
+
+
+@pytest.mark.asyncio
+async def test_smoke_runs_are_not_restricted_to_the_approved_runtime():
+    _, snap = await run(cfg(), UsageAgent(), UsageAgent())
+    assert json.loads(snap["runs"][0]["config_json"])["approved_runtime_enforced"] is False
+
+
+@pytest.mark.asyncio
+async def test_approved_pilot_run_records_every_runtime_setting():
+    claude, gpt = approved_agents()
+    _, snap = await run(approved_cfg(first_mover_policy="B"), gpt, claude)  # GPT in seat A
+    (run_row,) = snap["runs"]
+    full = json.loads(run_row["config_json"])
+    assert full["approved_runtime_enforced"] is True
+    assert full["experiment"]["max_rounds"] == 10 and full["experiment"]["max_transport_reruns"] == 2
+    a, b = full["agents"]["A"], full["agents"]["B"]
+    assert a["class"] == "OpenAIAgent" and b["class"] == "ClaudeAgent"
+    assert a["generation_config"] == approved_gen("OpenAIAgent").to_dict()
+    assert b["generation_config"] == approved_gen("ClaudeAgent").to_dict()
+    assert b["generation_config"]["effort"] == "medium" and a["generation_config"]["effort"] is None
+    assert b["params"]["thinking"] == "disabled"
+    assert a["params"]["api_seed"] is None and b["params"]["api_seed"] is None
+    deps = json.loads(run_row["dependency_versions_json"])
+    assert deps["anthropic"] and deps["openai"] and deps["httpx2"]
+    assert len(snap["negs"]) == 3

@@ -23,6 +23,9 @@ class ConfigError(ValueError):
     """Missing or invalid generation configuration."""
 
 
+EFFORT_LEVELS = ("low", "medium", "high", "max")
+
+
 @dataclass(frozen=True)
 class GenerationConfig:
     model: str
@@ -31,8 +34,13 @@ class GenerationConfig:
     timeout_s: float
     max_retries: int  # retries AFTER the first attempt; 0 = single attempt
     retry_backoff_s: float = 1.0  # sleep before retry k is backoff * 2**(k-1)
+    # Claude only: output_config.effort. None = not sent. OpenAIAgent rejects
+    # any value (the experiment uses a non-reasoning GPT model).
+    effort: Optional[str] = None
 
     def __post_init__(self):
+        if self.effort is not None and self.effort not in EFFORT_LEVELS:
+            raise ConfigError(f"effort must be one of {EFFORT_LEVELS} or None")
         if not self.model:
             raise ConfigError("model id must be a non-empty string")
         if self.temperature < 0:
@@ -52,7 +60,8 @@ class GenerationConfig:
     @classmethod
     def from_env(cls, prefix: str, env: Optional[Mapping[str, str]] = None) -> "GenerationConfig":
         """Read <PREFIX>_MODEL, _TEMPERATURE, _MAX_OUTPUT_TOKENS, _TIMEOUT_S,
-        _MAX_RETRIES (and optional _RETRY_BACKOFF_S). All five required."""
+        _MAX_RETRIES (and optional _RETRY_BACKOFF_S, _EFFORT). All five
+        required."""
         env = os.environ if env is None else env
         names = ["MODEL", "TEMPERATURE", "MAX_OUTPUT_TOKENS", "TIMEOUT_S", "MAX_RETRIES"]
         missing = [f"{prefix}_{n}" for n in names if not str(env.get(f"{prefix}_{n}", "")).strip()]
@@ -66,6 +75,7 @@ class GenerationConfig:
                 timeout_s=float(env[f"{prefix}_TIMEOUT_S"]),
                 max_retries=int(env[f"{prefix}_MAX_RETRIES"]),
                 retry_backoff_s=float(env.get(f"{prefix}_RETRY_BACKOFF_S", 1.0)),
+                effort=str(env.get(f"{prefix}_EFFORT", "")).strip() or None,
             )
         except ValueError as exc:
             raise ConfigError(f"Invalid generation setting for {prefix}: {exc}") from exc
