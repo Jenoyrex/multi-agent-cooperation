@@ -344,9 +344,388 @@ random_seed, timestamp, full_public_transcript, structured_actions`.
 - Concave/diminishing-returns utilities (§1.3 note).
 - More than 2 agents (protocol and metrics above are 2-agent only for now).
 - Any dashboard/UI.
-- Fine-tuning or RL training of either agent — Phase 1 is prompting-only
-  (baseline method). Structured protocol interventions come in Phase 2, per
-  the approved plan, and are not built yet.
+- Fine-tuning or RL training of either agent — the experiment is
+  prompting-only. The only intervention is the `structured_v1` negotiation
+  instruction strategy (§8), which changes instructions, not the protocol.
 - Precise billing: token/cost accounting (§3.7) records what providers
   report per call and cannot see tokens from discarded retry attempts or
   failed calls; it is not a billing system.
+
+---
+
+## 8. Preregistration of the experimental design
+
+This section preregisters the approved experimental design. It is written
+before any full-run negotiation has been run, and it contains no results
+and no expected results. The frozen negotiation protocol (§1–§4) and the
+metric definitions below are authoritative. Nothing in this section changes
+the protocol.
+
+### 8.1 Research question
+
+When two LLM agents (one Claude model, one GPT model) with private linear
+valuations negotiate a split of a shared resource pool under the frozen
+alternating-offers protocol, does the `structured_v1` negotiation
+instruction strategy change relative welfare efficiency, egalitarian
+welfare, or agreement rate compared with the `baseline_v1` instructions?
+
+### 8.2 Experimental conditions
+
+There are exactly two conditions. These are the exact condition labels used
+in the implementation (`INSTRUCTION_VARIANTS` in `src/agents/prompting.py`,
+stored as the run's `method`, and checked by `check_condition_label` in
+`src/experiments/runner.py`):
+
+| Condition label | System instructions |
+|---|---|
+| `baseline_v1` | exactly `SYSTEM_INSTRUCTIONS`, with nothing appended |
+| `structured_v1` | `SYSTEM_INSTRUCTIONS` followed by the fixed `STRUCTURED_V1_BLOCK` |
+
+In any negotiation both agents receive the same condition.
+
+**`structured_v1` is a multi-component negotiation instruction strategy,
+not a new negotiation protocol.** Both conditions use the same engine,
+turn structure, action set, termination rules, action schema, user-turn
+prompt, information given to each agent, and deadline. The only difference
+is the fixed instruction block appended to the system instructions.
+
+`structured_v1` has exactly three components, delivered together as one
+package:
+
+1. **Preference ranking/revelation**: in its `message`, the agent states
+   which categories matter most and least to it (a ranking is enough), and
+   asks the other agent for its ranking.
+2. **Integrative trade guidance**: the agent builds offers that give the
+   other agent more of the categories it values less, in exchange for more
+   of the categories it values more.
+3. **Disagreement-point/deadline reasoning**: before walking away, or before
+   the final round passes without an accepted offer, the agent compares the
+   offer on the table with the zero value both agents get if there is no
+   agreement.
+
+`structured_v1` has **no fairness instruction**. It never asks agents to
+split value equally, fairly, or equitably.
+
+### 8.3 Experimental design (full run)
+
+- **Instances:** 60 generated negotiation instances, with instance seeds
+  **40000–40059** (inclusive). An instance fixes the resource pool and both
+  private valuations.
+- **Resource categories:** K = 3.
+- **Valuations:** linear, separable private per-unit valuations, generated
+  as described in §2 (100-point ceiling per agent).
+- **Within-instance design:** a 2×2 role-balancing design, crossed with
+  condition. Every instance is run under every combination of:
+  - **Model seat swap:** Claude as Agent A with GPT as Agent B, and GPT as
+    Agent A with Claude as Agent B.
+  - **First-mover swap:** Agent A moves first, and Agent B moves first.
+  - **Condition:** `baseline_v1` and `structured_v1`.
+- **Negotiations per instance:** 2 × 2 × 2 = **8**.
+- **Total full-run negotiations:** 60 × 8 = **480**.
+
+The design uses one fixed Claude model and one fixed GPT model. Their exact
+model ids and all generation settings are recorded in each run's provenance
+(§3.7). They are identical in every cell and in both conditions.
+
+### 8.4 Pilot design
+
+- **Pilot seeds:** 30000, 30001, 30002. These are different from the
+  full-run seeds.
+- **Cells:** the same 8 cells as the full run (seat × first mover ×
+  condition).
+- **Negotiations per cell:** 3 (one per pilot seed).
+- **Total pilot negotiations:** 8 × 3 = **24**.
+- **Pilot batches:** 8, one batch per cell. Each batch runs 3 negotiations
+  with a fixed first-mover policy (`A` or `B`). The pilot is split into 8
+  batches because pilot mode limits a batch to 20 negotiations.
+
+The pilot is an operational check. Pilot negotiations are not part of the
+confirmatory dataset.
+
+### 8.5 Frozen outcome semantics
+
+Each negotiation ends in exactly one of four outcomes (§3.3):
+
+- `agreed`: an agent returns `ACCEPT` while a valid standing offer from the
+  **opponent** is on the table. The final allocation is the accepted offer.
+- `walked_away`: an agent returns `WALK_AWAY`. `WALK_AWAY` is allowed on
+  any turn, including the first and the final turn.
+- `timeout`: an agent returns a well-formed, valid `OFFER` on the final
+  turn (turn `MAX_ROUNDS`). A final valid OFFER becomes `timeout`: it is
+  recorded in the transcript, it is never a standing offer, and it produces
+  no allocation.
+- `invalid_action`: a protocol or output fault. `invalid_reason` holds
+  exactly one of these values:
+  - `malformed_output`: the output could not be parsed into an action
+    (includes truncated, refused, empty, or non-JSON output).
+  - `invalid_allocation`: an `OFFER` whose allocation is missing or not
+    feasible. A broken OFFER on the final turn is `invalid_action` /
+    `invalid_allocation`, **not** `timeout`.
+  - `illegal_accept`: an `ACCEPT` with no valid standing opponent offer.
+    This includes an `ACCEPT` on the first turn and an `ACCEPT` of the
+    agent's own standing offer.
+
+`ACCEPT` requires a valid standing offer from the opponent. There are no
+automatic retries of strategic actions. Allocations are never repaired
+(§3.5).
+
+### 8.6 Metric definitions
+
+Notation, for one negotiation:
+
+- `q_c`: quantity of category `c`.
+- `v_i[c]`: agent `i`'s private per-unit value. By construction
+  `sum_c v_i[c] * q_c = 100` (§2).
+- `x_i[c]`: units of `c` given to agent `i` in the final allocation.
+- `u_i = sum_c v_i[c] * x_i[c]`: agent `i`'s utility. The 100-point ceiling
+  makes `u_i / 100` the normalized utility.
+- `agreed`: 1 if the outcome is `agreed`, otherwise 0.
+
+**Social welfare**
+```
+SW = u_A + u_B                                  (agreed negotiations only)
+```
+
+**Theoretical maximum welfare** (§4, computed from both hidden valuations)
+```
+W* = sum_c q_c * max(v_A[c], v_B[c])
+```
+`W* >= 100` for every instance, so every ratio below is well-defined.
+
+**Relative welfare efficiency (RWE), unconditional**
+```
+RWE = SW / W*    if agreed
+RWE = 0          otherwise (walked_away, timeout, invalid_action)
+```
+
+**Egalitarian welfare, unconditional**
+```
+EW = min(u_A, u_B) / 100    if agreed
+EW = 0                      otherwise
+```
+
+**Agreement rate**
+```
+agreement_rate = (number of agreed negotiations) / (number of negotiations)
+```
+
+**Conditional social welfare efficiency** (agreed negotiations only)
+```
+SWE = SW / W*
+```
+This is RWE restricted to agreed negotiations (the SWE of §5.2).
+
+**Equitability** (agreed negotiations only, §5.3)
+```
+equitability = 1 - | u_A/100 - u_B/100 |
+```
+
+**Envy** (agreed negotiations only, §5.4). Let `x_A` and `x_B` be the two
+final bundles:
+```
+envious_A = (sum_c v_A[c] * x_B[c]) > (sum_c v_A[c] * x_A[c])
+envious_B = (sum_c v_B[c] * x_A[c]) > (sum_c v_B[c] * x_B[c])
+envy_free = not envious_A and not envious_B
+```
+
+**Model imbalance** (agreed negotiations only, §5.6, reported by model
+rather than by seat)
+```
+imbalance = u_Claude/100 - u_GPT/100
+```
+
+**First-mover effect** (agreed negotiations only)
+```
+first_mover_gap = u_first/100 - u_second/100
+```
+Outcome rates are also reported separately for A-first and B-first cells.
+
+**Failures score 0 on the unconditional confirmatory metrics.**
+`walked_away`, `timeout`, and `invalid_action` all score 0 for RWE and
+egalitarian welfare.
+
+**Allocation-dependent metrics** (SW, conditional SWE, equitability, envy,
+model imbalance, first-mover gap) **are defined only for `agreed`
+negotiations with a valid final allocation.** For every other outcome they
+are undefined, not 0.
+
+### 8.7 Metric hierarchy
+
+**Confirmatory** (tested, H1–H3):
+1. Relative welfare efficiency (RWE), unconditional.
+2. Egalitarian welfare, unconditional.
+3. Agreement rate.
+
+**Secondary descriptive** (reported, not tested):
+- Equitability, agreement-only.
+- Conditional social welfare efficiency, agreement-only.
+
+**Diagnostics** (reported, not tested):
+- Envy (per-agent envy and envy-free rate).
+- Model imbalance (Claude vs. GPT).
+- First-mover effects.
+- Outcome rates (walked_away, timeout, invalid_action, with invalid
+  actions broken down by `invalid_reason`) and rounds to agreement.
+
+Secondary and diagnostic metrics are reported with the number of agreed
+negotiations each one is based on.
+
+### 8.8 Hypotheses
+
+The hypotheses are **non-directional**:
+
+- **H1:** Relative welfare efficiency differs between `baseline_v1` and
+  `structured_v1`.
+- **H2:** Egalitarian welfare differs between `baseline_v1` and
+  `structured_v1`.
+- **H3:** Agreement rate differs between `baseline_v1` and
+  `structured_v1`.
+
+The null hypothesis for each is that the metric does not differ between
+conditions.
+
+### 8.9 Statistical analysis
+
+- **Unit of analysis:** the instance (n = 60). Negotiations within an
+  instance are not treated as independent.
+- **Per-instance value:** for each instance `i`, condition `k`, and
+  confirmatory metric, `m_{i,k}` is the mean of the metric over that
+  condition's 4 negotiations (2 seats × 2 first movers). For agreement
+  rate, this is the fraction of those 4 negotiations that were `agreed`.
+- **Paired difference:** `d_i = m_{i,structured_v1} - m_{i,baseline_v1}`.
+- **Test statistic:** `T = mean_i(d_i)`.
+- **Primary test:** a two-sided sign-flip permutation test on the `d_i`
+  with 10,000 random sign-flip permutations. Each permutation multiplies
+  every `d_i` by an independent random ±1 and recomputes `T*`.
+  `p = (1 + #{ |T*| >= |T| }) / (1 + 10000)`.
+- **Interval estimate:** a 95% percentile bootstrap CI for `mean(d_i)`,
+  resampling instances with replacement, 10,000 resamples.
+- **Sensitivity analysis:** a two-sided Wilcoxon signed-rank test on the
+  same `d_i` (zero differences dropped).
+- **Multiplicity:** Holm correction across the three permutation p-values
+  for H1–H3, with family-wise α = 0.05. The Wilcoxon results are reported
+  as sensitivity checks and are not part of the corrected family.
+- **Secondary and diagnostic metrics:** descriptive only (condition-level
+  summaries and agreed-negotiation counts). No hypothesis tests.
+- **Randomness in the analysis:** the random seed for permutation and
+  bootstrap resampling is fixed and recorded with the analysis output.
+- **No interim stopping:** all 480 full-run negotiations are run. Outcomes
+  are not compared by condition before the full run is complete, and the
+  sample size does not depend on any observed result.
+
+### 8.10 Experimental controls
+
+- **Deterministic instance generation:** the resource pool and both
+  valuations are fully determined by the instance seed (§1.1, §2). In a
+  batch, the instance seed of negotiation `i` is `base_seed + i`.
+- **Stable SHA-256 seed derivation:** per-agent valuation seeds come from
+  `derive_seed(instance_seed, role)`, a SHA-256 hash. They do not depend on
+  Python's per-process salted `hash()`.
+- **First mover independent of generation:** the first mover comes only
+  from the configured first-mover policy and the negotiation index. It
+  never affects, and is never affected by, resource or valuation
+  generation (§3.1).
+- **Role/seat swapping:** each model plays both seats, and each seat moves
+  first and second, on every instance in both conditions (§8.3).
+- **Frozen protocol:** the negotiation engine, action schema, prompts,
+  outcome semantics, and metrics are frozen for the experiment. The
+  condition label is checked against the instructions each agent actually
+  sends, so a run cannot carry the wrong label.
+- **No strategic retries:** strategic outcomes (including invalid actions)
+  are never retried. A negotiation is never re-run because of its outcome.
+- **Provenance:** every run stores its full configuration, protocol id,
+  spec fingerprint, prompt hash, code version, dependency versions, and raw
+  model outputs (§3.7).
+
+### 8.11 Failure handling
+
+- **Strategic outcomes vs. infrastructure failures.** `agreed`,
+  `walked_away`, `timeout`, and `invalid_action` are strategic outcomes and
+  are analysed as specified. Transport failures (connection errors,
+  timeouts, rate limits, or 5xx errors after in-turn retries, auth or
+  bad-request errors) and budget stops are infrastructure failures, not
+  outcomes (§3.6).
+- **Transport aborts need a clean rerun.** An aborted negotiation gets no
+  outcome and is stored separately in `aborted_negotiations`. It is never
+  resumed mid-session. It must be re-run cleanly from turn 1 with the same
+  instance seed, cell, and condition, so that the dataset contains all 480
+  full-run negotiations.
+- **Invalid-action sensitivity analysis.** In the primary analysis,
+  `invalid_action` is a failure (0 for RWE and egalitarian welfare, not
+  agreed for agreement rate). As a pre-specified sensitivity analysis,
+  H1–H3 are recomputed with `invalid_action` negotiations removed.
+  Per-instance means use each condition's remaining negotiations, and an
+  instance with no remaining negotiations in a condition is left out of
+  this sensitivity analysis only. Invalid-action rates by condition and by
+  `invalid_reason` are always reported. The primary analysis stays the
+  confirmatory one.
+
+### 8.12 Methodological limitations
+
+- **Bundled intervention.** `structured_v1` is one multi-component package
+  (preference ranking/revelation, integrative trade guidance,
+  disagreement-point/deadline reasoning). Any difference between conditions
+  can only be attributed to the package as a whole. The design cannot
+  causally isolate the effect of any single component.
+- **Provider/output-schema asymmetry.** Claude returns actions through a
+  forced tool call. GPT returns actions through strict JSON-schema
+  structured output. The prompts carry the same information, but the
+  output mechanisms differ, which may affect malformed-output rates and
+  behavior.
+- **One model pairing.** Only one Claude model and one GPT model are
+  tested. Results may not generalize to other models or pairings.
+- **LLM stochasticity.** Model outputs are stochastic. Repeating a
+  negotiation with the same seed and settings may give a different outcome.
+- **Model/version drift.** Provider models can change behind the same
+  identifier over time. Model ids and run timestamps are recorded, but
+  drift cannot be fully ruled out.
+- **Welfare/fairness tension from linear utility.** With linear
+  valuations, the welfare-maximizing allocation gives each category
+  entirely to the agent that values it more (§1.3, §4). It can therefore be
+  highly unequal. Efficiency and fairness metrics may diverge by
+  construction.
+- **Post-treatment selection in agreement-only metrics.** Conditional SWE
+  and equitability are computed only on agreed negotiations. Condition can
+  affect which negotiations reach agreement, so differences in these
+  metrics are not clean treatment effects. This is why they are secondary
+  and descriptive.
+- **Correlated outcomes.** RWE, egalitarian welfare, and agreement rate
+  are all driven by agreement (failures score 0), so they may be strongly
+  correlated. Holm correction controls the family-wise error rate but does
+  not make the three tests independent.
+
+### 8.13 Utility model scope
+
+The primary experiment uses **linear** utilities (§1.3, §2). Concave
+(diminishing-returns) utilities are a possible future or secondary
+experiment. They are **not** part of this preregistration.
+
+### 8.14 Analysis decisions made before observing full experimental results
+
+All of the following were fixed before any full-run negotiation was run:
+
+1. Conditions and labels: `baseline_v1` vs. `structured_v1`, with the
+   instruction texts frozen in `src/agents/prompting.py`.
+2. Design: 60 instances (seeds 40000–40059), K = 3, linear valuations,
+   seat swap × first-mover swap × condition, 8 negotiations per instance,
+   480 in total.
+3. Pilot: seeds 30000–30002, 8 cells × 3 negotiations, 24 negotiations in
+   8 batches, not part of the confirmatory dataset.
+4. Outcome semantics and `invalid_reason` values as in §8.5.
+5. Metric formulas as in §8.6, including 0 for failures in unconditional
+   RWE and egalitarian welfare, and undefined allocation-dependent metrics
+   for non-agreed negotiations.
+6. Metric hierarchy: confirmatory (RWE, egalitarian welfare, agreement
+   rate), secondary descriptive (agreement-only equitability, conditional
+   SWE), diagnostics (envy, model imbalance, first-mover effects).
+7. Non-directional hypotheses H1–H3.
+8. Instance as the unit of analysis, with per-instance means over the 4
+   negotiations of each condition and paired differences.
+9. Two-sided sign-flip permutation test (10,000 permutations), 95%
+   percentile bootstrap CI (10,000 resamples), Wilcoxon signed-rank
+   sensitivity analysis, Holm correction across H1–H3 at α = 0.05.
+10. No interim stopping.
+11. Transport aborts are infrastructure failures that need a clean rerun
+    and are never outcomes. There are no strategic retries.
+12. The invalid-action sensitivity analysis as specified in §8.11.
+13. No exclusion rules beyond those stated in this section.
