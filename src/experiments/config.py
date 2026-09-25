@@ -41,6 +41,12 @@ APPROVED_MAX_ROUNDS = 10
 # Operational: affects only infrastructure failures, never strategic outcomes.
 APPROVED_OPERATIONAL = {"timeout_s": 120.0, "max_retries": 3, "retry_backoff_s": 2.0}
 APPROVED_MAX_TRANSPORT_RERUNS = 2
+# USD per 1M (input, output) tokens for the approved models, as supplied by
+# the user from provider pricing (Standard tier). Used for dollar caps.
+APPROVED_PRICES = {
+    "claude-sonnet-4-6": (3.0, 15.0),
+    "gpt-4.1-2025-04-14": (2.0, 8.0),
+}
 
 
 def check_approved_runtime(config: "ExperimentConfig", agents) -> None:
@@ -93,6 +99,10 @@ class ExperimentConfig:
     # required for pilot/full mode. A dollar budget needs a price table.
     budget_max_total_tokens: Optional[int] = None
     budget_max_cost_usd: Optional[float] = None
+    # Explicit per-attempt input-token ceiling used to reserve the worst
+    # case of each call before it starts (see Budget). Required for pilot
+    # mode; no default, because input size is only known after a call.
+    budget_max_input_tokens_per_call: Optional[int] = None
 
     def first_mover_for(self, index: int) -> str:
         if self.first_mover_policy == "alternate":
@@ -109,10 +119,14 @@ class ExperimentConfig:
             raise ValueError(f"Unknown first_mover_policy: {self.first_mover_policy!r}")
         if self.max_transport_reruns < 0:
             raise ValueError("max_transport_reruns must be >= 0")
-        for name in ("budget_max_total_tokens", "budget_max_cost_usd"):
+        for name in ("budget_max_total_tokens", "budget_max_cost_usd",
+                     "budget_max_input_tokens_per_call"):
             v = getattr(self, name)
-            if v is not None and v <= 0:
-                raise ValueError(f"{name} must be > 0")
+            if v is not None and (isinstance(v, bool) or not math.isfinite(v) or v <= 0):
+                raise ValueError(f"{name} must be a finite number > 0")
+        if self.mode == "pilot" and self.budget_max_input_tokens_per_call is None:
+            raise ValueError("pilot mode requires budget_max_input_tokens_per_call "
+                             "(the per-call reserve of the budget guard).")
         if self.mode == "smoke" and self.num_negotiations > 5:
             raise ValueError("Smoke mode is capped at 5 negotiations by design.")
         if self.mode == "pilot" and self.num_negotiations > 20:
