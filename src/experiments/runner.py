@@ -120,7 +120,10 @@ def check_condition_label(config: ExperimentConfig, agents: List[Agent]) -> None
         )
 
 
-def _make_budget(config: ExperimentConfig, agents: List[Agent], prices: Optional[Prices]) -> Optional[Budget]:
+def make_budget(config: ExperimentConfig, agents: List[Agent], prices: Optional[Prices]) -> Optional[Budget]:
+    """The run's Budget, or None if no cap is configured. With
+    config.budget_max_input_tokens_per_call set, every real agent's model
+    gets a worst-case reserve (see Budget)."""
     if config.budget_max_total_tokens is None and config.budget_max_cost_usd is None:
         return None
     if config.budget_max_cost_usd is not None:
@@ -128,7 +131,12 @@ def _make_budget(config: ExperimentConfig, agents: List[Agent], prices: Optional
         missing = sorted(m for m in models if not prices or m not in prices)
         if missing:
             raise ValueError(f"budget_max_cost_usd needs prices for models: {missing}")
-    return Budget(config.budget_max_total_tokens, config.budget_max_cost_usd, prices)
+    reserve = None
+    if config.budget_max_input_tokens_per_call is not None:
+        reserve = {a.config.model: (config.budget_max_input_tokens_per_call,
+                                    a.config.max_output_tokens, 1 + a.config.max_retries)
+                   for a in agents if a.config is not None}
+    return Budget(config.budget_max_total_tokens, config.budget_max_cost_usd, prices, reserve)
 
 
 async def run_batch(
@@ -138,6 +146,7 @@ async def run_batch(
     db_path: str | Path,
     confirmed_full_run: bool = False,
     prices: Optional[Prices] = None,
+    budget: Optional[Budget] = None,
 ) -> List[NegotiationRecord]:
     """Run `config.num_negotiations` independent negotiations and persist
     each to SQLite as it completes (not batched at the end, so a crash
@@ -148,7 +157,8 @@ async def run_batch(
     config.max_transport_reruns allows, re-run from scratch (never resumed).
     If reruns are exhausted the negotiation is simply absent from
     `negotiations` and the run finishes as 'incomplete'. A budget stop ends
-    the whole run as 'budget_exhausted'."""
+    the whole run as 'budget_exhausted'. A `budget` passed in (shared across
+    runs, e.g. the pilot's batches) replaces the run's own."""
     check_condition_label(config, [agent_A, agent_B])
     if config.mode in ("pilot", "full"):
         check_approved_runtime(config, [agent_A, agent_B])
@@ -160,7 +170,8 @@ async def run_batch(
         print("Re-run with confirmed_full_run=True to proceed. STOPPING.")
         return []
 
-    budget = _make_budget(config, [agent_A, agent_B], prices)
+    if budget is None:
+        budget = make_budget(config, [agent_A, agent_B], prices)
     run_id = uuid.uuid4().hex
     conn = get_connection(db_path)
     records: List[NegotiationRecord] = []

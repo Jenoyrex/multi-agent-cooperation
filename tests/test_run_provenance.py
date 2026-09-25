@@ -230,7 +230,10 @@ def test_pilot_and_full_require_a_budget():
     for mode in ("pilot", "full"):
         with pytest.raises(ValueError, match="budget"):
             cfg(mode=mode, num_negotiations=2)
-    cfg(mode="pilot", num_negotiations=2, budget_max_total_tokens=1000)
+    with pytest.raises(ValueError, match="budget_max_input_tokens_per_call"):
+        cfg(mode="pilot", num_negotiations=2, budget_max_total_tokens=1000)
+    cfg(mode="pilot", num_negotiations=2, budget_max_total_tokens=1000,
+        budget_max_input_tokens_per_call=4000)
 
 
 def test_estimate_uses_max_output_tokens_prices_and_observed_usage():
@@ -280,7 +283,7 @@ def approved_agents(claude_over=None, openai_over=None, n=4):
 def approved_cfg(**kw):
     return cfg(**{"mode": "pilot", "num_negotiations": 3, "max_rounds": APPROVED_MAX_ROUNDS,
                   "max_transport_reruns": APPROVED_MAX_TRANSPORT_RERUNS,
-                  "budget_max_total_tokens": 100_000, **kw})
+                  "budget_max_total_tokens": 100_000, "budget_max_input_tokens_per_call": 4000, **kw})
 
 
 def test_approved_values_are_the_preregistered_ones():
