@@ -107,6 +107,19 @@ cp .env.example .env   # then fill in your keys
 PYTHONPATH=. python scripts/run_real_smoke_test.py
 ```
 
+## Dashboard (read-only)
+
+```bash
+PYTHONPATH=. python -m dashboard.server        # http://127.0.0.1:8765
+node --test tests/dashboard_lib.test.mjs        # UI helper tests
+```
+
+Stdlib server + static page in `dashboard/`. It reads `results/*.db` in
+SQLite read-only mode, reuses `src/evaluation/metrics.py` for every number,
+and never starts or changes a run. Full-run results stay locked until all
+480 negotiations exist (spec §8.9). No inferential statistics are shown,
+because the §8.9 analysis has not been implemented yet.
+
 ## Limitations (Phase 0/1)
 
 - Valuations are linear/separable, which makes the welfare-maximizing
