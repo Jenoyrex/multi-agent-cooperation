@@ -3,7 +3,7 @@
 export const OUTCOMES = ["agreed", "walked_away", "timeout", "invalid_action"];
 export const OUTCOME_LABEL = { agreed: "Agreed", walked_away: "Walked away", timeout: "Timeout", invalid_action: "Invalid action" };
 export const CONDITIONS = ["baseline_v1", "structured_v1"];
-export const FAMILY_LABEL = { claude: "Claude", openai: "OpenAI" };
+export const FAMILY_LABEL = { claude: "Claude", openai: "GPT" };
 
 const ESC = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
 export const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ESC[c]);
@@ -73,6 +73,44 @@ export const mean = (xs) => {
 /** Outcome counts -> ordered [{outcome, count, share}] over n. */
 export function outcomeShares(counts, n) {
   return OUTCOMES.map((o) => ({ outcome: o, count: counts?.[o] ?? 0, share: n ? (counts?.[o] ?? 0) / n : 0 }));
+}
+
+/**
+ * Design-cell index 0..7 in the preregistered order (condition x Claude seat x
+ * first mover, as PILOT_CELLS enumerates them), or null for rows outside it.
+ */
+export function cellIndex(r) {
+  const c = CONDITIONS.indexOf(r.condition);
+  if (c < 0 || !["A", "B"].includes(r.claude_seat) || !["A", "B"].includes(r.first_mover)) return null;
+  return c * 4 + (r.claude_seat === "A" ? 0 : 2) + (r.first_mover === "A" ? 0 : 1);
+}
+
+/**
+ * Which register slots hold a recorded negotiation. Slot = instance * 8 + cell.
+ * Records completion only, never outcome, so nothing is compared by condition.
+ */
+export function registerSlots(rows, seeds) {
+  const filled = new Set();
+  for (const r of rows) {
+    const inst = seeds.indexOf(r.seed), cell = cellIndex(r);
+    if (inst >= 0 && cell !== null) filled.add(inst * 8 + cell);
+  }
+  return filled;
+}
+
+/** Pilot -> full run -> analysis stages, from recorded data only. */
+export function labStages(snap) {
+  const { pilot, full } = snap.progress;
+  const running = (m) => snap.runs.some((r) => r.mode === m && r.status === "running");
+  const stage = (p, m) => (p.done >= p.target ? "complete" : running(m) ? "running" : p.done > 0 ? "partial" : "ready");
+  const pilotState = stage(pilot, "pilot");
+  const fullState = full.done >= full.target ? "complete" : full.done > 0 || running("full") ? (running("full") ? "running" : "partial") : "locked";
+  return {
+    pilot: pilotState,
+    full: fullState,
+    analysis: pilot.done + full.done === 0 ? "awaiting" : full.done >= full.target ? "pending" : "sealed",
+    empty: pilot.done + full.done === 0,
+  };
 }
 
 export function timeAgo(epochSeconds, now = Date.now() / 1000) {

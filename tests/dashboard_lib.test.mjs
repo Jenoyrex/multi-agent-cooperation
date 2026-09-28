@@ -1,7 +1,7 @@
 // Run: node --test tests/
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { dotStack, esc, filterRows, fmt, outcomeShares, pct, phase, signed } from "../dashboard/static/lib.js";
+import { cellIndex, dotStack, esc, filterRows, fmt, labStages, outcomeShares, pct, phase, registerSlots, signed } from "../dashboard/static/lib.js";
 
 const rows = [
   { key: "pilot:1", mode: "pilot", condition: "baseline_v1", family_A: "claude", family_B: "openai", model_A: "claude:x", model_B: "openai:y", first_mover: "A", outcome: "agreed", seed: 30000 },
@@ -59,4 +59,32 @@ test("phase is derived from recorded data only", () => {
   assert.equal(phase(snap(5, 0, [{ mode: "pilot", status: "budget_exhausted" }])).label, "Pilot incomplete");
   assert.equal(phase(snap(24, 0, [{ mode: "pilot", status: "completed" }])).label, "Pilot complete");
   assert.equal(phase(snap(24, 480)).label, "Full run complete");
+});
+
+test("cellIndex follows the preregistered cell order (condition x Claude seat x first mover)", () => {
+  const c = (condition, claude_seat, first_mover) => cellIndex({ condition, claude_seat, first_mover });
+  assert.deepEqual([c("baseline_v1", "A", "A"), c("baseline_v1", "A", "B"), c("baseline_v1", "B", "A"), c("baseline_v1", "B", "B")], [0, 1, 2, 3]);
+  assert.equal(c("structured_v1", "A", "A"), 4);
+  assert.equal(c("structured_v1", "B", "B"), 7);
+  assert.equal(c("baseline_plain_prompting", "A", "A"), null);
+  assert.equal(c("baseline_v1", null, "A"), null);
+});
+
+test("registerSlots places rows by instance and cell, ignoring foreign seeds", () => {
+  const seeds = [30000, 30001, 30002];
+  const slots = registerSlots([
+    { seed: 30001, condition: "structured_v1", claude_seat: "B", first_mover: "A" },
+    { seed: 99999, condition: "baseline_v1", claude_seat: "A", first_mover: "A" },
+  ], seeds);
+  assert.deepEqual([...slots], [8 + 6]);
+});
+
+test("labStages: empty lab is ready / locked / awaiting", () => {
+  const snap = (p, f, runs = []) => ({ progress: { pilot: { done: p, target: 24 }, full: { done: f, target: 480 } }, runs });
+  assert.deepEqual(labStages(snap(0, 0)), { pilot: "ready", full: "locked", analysis: "awaiting", empty: true });
+  assert.equal(labStages(snap(3, 0, [{ mode: "pilot", status: "running" }])).pilot, "running");
+  assert.equal(labStages(snap(3, 0)).pilot, "partial");
+  assert.deepEqual(labStages(snap(24, 10)), { pilot: "complete", full: "partial", analysis: "sealed", empty: false });
+  assert.equal(labStages(snap(24, 480)).full, "complete");
+  assert.equal(labStages(snap(24, 480)).analysis, "pending");
 });
