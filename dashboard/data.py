@@ -217,9 +217,14 @@ def transcript_events(row: sqlite3.Row, record: NegotiationRecord) -> list[dict]
     """The stored public transcript, turn by turn, annotated with the
     standing offer and the evaluator-side value of each offer (computed from
     the stored hidden valuations; agents never saw these)."""
-    calls = {(c.get("turn_number"), c.get("actor")): c for c in json.loads(row["calls_json"])}
+    return events_for(json.loads(row["transcript_json"]), json.loads(row["calls_json"]), record)
+
+
+def events_for(transcript: list[dict], call_log: list[dict], record: NegotiationRecord) -> list[dict]:
+    """transcript_events for an in-memory transcript (sandbox runs use it too)."""
+    calls = {(c.get("turn_number"), c.get("actor")): c for c in call_log}
     events, standing = [], None
-    for t in json.loads(row["transcript_json"]):
+    for t in transcript:
         a, turn, actor = t["action"], t["turn_number"], t["actor"]
         ev = {"turn": turn, "actor": actor, "action": a["action_type"], "message": a["message"],
               "allocation": a["allocation"], "value_A": None, "value_B": None,
@@ -365,6 +370,10 @@ def setup() -> dict:
         "pilot": {"seeds": list(PILOT_SEEDS), "total": PILOT_TOTAL,
                   "cells": [asdict(c) for c in PILOT_CELLS]},
         "full": {"seeds": list(FULL_RUN_SEEDS), "instances": FULL_RUN_INSTANCES,
-                 "total": FULL_RUN_TOTAL, "source": "docs/spec.md §8.3 (no full-run driver in code yet)"},
+                 "total": FULL_RUN_TOTAL, "source": "docs/spec.md §8.3 (no full-run driver in code yet)",
+                 "driver_implemented": False},
+        # The §8.9 tests (permutation, bootstrap, Holm) are not in code yet. Flip when they are,
+        # so the dashboard never implies the analysis is ready to run.
+        "analysis_implemented": False,
     }
 

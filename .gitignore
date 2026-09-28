@@ -8,3 +8,4 @@ venv/
 results/*.db
 results/*.csv
 .DS_Store
+sandbox_runs/
