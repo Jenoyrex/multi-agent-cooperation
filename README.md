@@ -1,8 +1,33 @@
 # Multi-Agent Cooperation: Resource-Split Negotiation Game
 
-**Status: Phase 0/1 complete. No experiments have been run. This repo
-currently contains the formal spec, the harness, and a zero-cost
-plumbing test — not results.**
+**Status:** the Phase 1 experiment harness is implemented: a frozen
+negotiation engine, the preregistered experimental design and metrics
+(`docs/spec.md` §8), a pilot driver with a budget guard, and a read-only
+results dashboard. A separate Phase 2 tool, the Agent Lab, exists as a
+vertical slice (`lab/`, see [below](#phase-2-agent-lab)). **No
+experimental results are reported in this repository.**
+
+## At a glance
+
+- **What it is:** a controlled environment in which two LLM agents with
+  hidden valuations negotiate how to split a pool of resources, plus the
+  metrics and tooling to compare negotiation strategies.
+- **Why it exists:** to test whether a structured negotiation instruction
+  strategy (`structured_v1`) changes welfare, fairness and agreement rates
+  compared with plain prompting (`baseline_v1`); see `docs/spec.md` §8.
+- **Key technical decisions:**
+  - Every negotiation instance is derived from a single integer seed, and
+    every run is logged to SQLite with its full transcript and both hidden
+    valuations.
+  - Metrics are computed by the evaluator against a computed optimum,
+    never self-reported by agents; their definitions and the analysis plan
+    are preregistered in `docs/spec.md` §8.
+  - Agents only ever receive an `AgentView` (the privacy boundary); the
+    Claude and OpenAI agents share one prompt builder.
+  - Real-model runs are cost-gated: `smoke` and `pilot` modes are capped,
+    and a full run requires explicit confirmation after a cost estimate.
+- **Try it:** the test suite and the mock-agent smoke test need no API
+  keys; see [Running it](#running-it).
 
 ## Team
 
@@ -71,8 +96,11 @@ agents themselves.
 
 **Plain prompting**: agents get the rules and their own private valuation,
 nothing else — no explicit instruction to cooperate, no shared scratchpad,
-no fairness framing. This is what later structured-protocol methods
-(Phase 2, not yet built) will be compared against.
+no fairness framing. This is the `baseline_v1` condition that the
+`structured_v1` instruction strategy is compared against
+(`src/agents/prompting.py`, `docs/spec.md` §8.2). Both conditions use the
+same engine and protocol; `structured_v1` only appends a fixed block to
+the system instructions.
 
 ## Reproducibility
 
@@ -120,18 +148,34 @@ and never starts or changes a run. Full-run results stay locked until all
 480 negotiations exist (spec §8.9). No inferential statistics are shown,
 because the §8.9 analysis has not been implemented yet.
 
-## Limitations (Phase 0/1)
+## Phase 2: Agent Lab
+
+A separate tool built on the frozen Phase 1 engine: a third party can
+connect two agents (including their own, over HTTP), run them through the
+same controlled negotiation environment under a balanced design, and read
+evaluator-computed outcome and behavior measurements. It reports
+measurements only and never ranks agents. It does not use or modify the
+Phase 1 preregistration, runner or research databases.
+
+Implemented as a vertical slice: `lab/` (agent adapters, evaluation
+design, behavioral metrics, a reference HTTP agent), `/api/lab/*`
+endpoints in `dashboard/server.py`, and an Agent Lab page in the
+dashboard. Design, security model and known limits:
+[`docs/phase2-agent-lab-plan.md`](docs/phase2-agent-lab-plan.md).
+
+## Limitations
 
 - Valuations are linear/separable, which makes the welfare-maximizing
   allocation always "winner take all per category" — efficiency and
   fairness are expected to trade off by construction. See `docs/spec.md`
   §1.3 for why this was chosen anyway for the MVP, and the documented
   extension (concave utilities) if this makes results uninteresting.
-- Two agents only; no more than one structured protocol variant exists
-  yet (baseline only — Phase 2 not started).
-- No experiments have been run. Every number in this repo so far comes
-  from either hand-computed test fixtures or the mock-agent plumbing
-  test, both explicitly labeled as such.
+- Two agents only; one negotiation protocol. The two experimental
+  conditions (`baseline_v1`, `structured_v1`) differ only in system
+  instructions.
+- No experimental results are reported here. Every number in this repo
+  comes from either hand-computed test fixtures or the mock-agent
+  plumbing test, both explicitly labeled as such.
 
 ## Project structure
 
@@ -142,17 +186,21 @@ multi-agent-cooperation/
 ├── .env.example
 ├── .gitignore
 ├── docs/
-│   └── spec.md              # Phase 0 formal specification
+│   ├── spec.md              # formal specification + §8 preregistration
+│   └── phase2-agent-lab-plan.md  # Agent Lab design and security model
 ├── src/
 │   ├── agents/               # Agent interface + mock/Claude/OpenAI implementations
 │   ├── environment/           # resource pool, valuations, allocation validation, optimum
 │   ├── negotiation/            # protocol engine (privacy boundary lives here)
 │   ├── evaluation/              # metrics
-│   ├── experiments/              # config, cost gating, batch runner
+│   ├── experiments/              # config, cost gating, batch runner, pilot
 │   └── storage/                   # SQLite persistence
-├── tests/                          # 43 tests, see below
+├── lab/                            # Phase 2 Agent Lab
+├── dashboard/                      # read-only results dashboard + Agent Lab UI
+├── tests/                          # 344 pytest tests + 10 Node dashboard tests
 ├── scripts/
 │   ├── run_smoke_test.py            # mock agents, zero cost
-│   └── run_real_smoke_test.py        # real models, capped at 3 negotiations
+│   ├── run_real_smoke_test.py        # real models, capped at 3 negotiations
+│   └── run_pilot.py                  # preregistered pilot (§8.4), real API cost
 └── results/                           # SQLite DBs land here (gitignored)
 ```
