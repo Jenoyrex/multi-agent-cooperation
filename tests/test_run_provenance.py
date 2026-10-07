@@ -226,6 +226,21 @@ def test_max_rounds_below_two_rejected():
     cfg(max_rounds=2)
 
 
+@pytest.mark.parametrize("mode", ["smoke", "pilot", "full"])
+@pytest.mark.parametrize("bad", [0, -1, True, 2.0, "3"])
+def test_num_negotiations_must_be_a_positive_integer(mode, bad):
+    # Budget values are valid for every mode, so only num_negotiations is wrong.
+    with pytest.raises(ValueError, match="num_negotiations must be an integer >= 1"):
+        cfg(mode=mode, num_negotiations=bad, budget_max_total_tokens=1000,
+            budget_max_input_tokens_per_call=4000)
+
+
+def test_num_negotiations_lower_bound_accepts_one():
+    cfg(num_negotiations=1)
+    cfg(mode="pilot", num_negotiations=1, budget_max_total_tokens=1000,
+        budget_max_input_tokens_per_call=4000)
+
+
 def test_pilot_and_full_require_a_budget():
     for mode in ("pilot", "full"):
         with pytest.raises(ValueError, match="budget"):
