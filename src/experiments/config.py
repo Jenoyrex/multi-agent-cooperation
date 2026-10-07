@@ -115,6 +115,10 @@ class ExperimentConfig:
                 "max_rounds must be >= 2: the final turn is response-only, so a "
                 "1-round negotiation could never produce an agreement."
             )
+        # 0 or negative would store an empty run marked 'completed'.
+        if (isinstance(self.num_negotiations, bool) or not isinstance(self.num_negotiations, int)
+                or self.num_negotiations < 1):
+            raise ValueError(f"num_negotiations must be an integer >= 1, got {self.num_negotiations!r}")
         if self.first_mover_policy not in ("A", "B", "alternate"):
             raise ValueError(f"Unknown first_mover_policy: {self.first_mover_policy!r}")
         if self.max_transport_reruns < 0:
