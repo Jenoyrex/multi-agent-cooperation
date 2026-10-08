@@ -30,6 +30,7 @@ from typing import Optional
 from dotenv import load_dotenv
 
 from dashboard import data as D
+from dashboard import demo
 from src.agents.base import Agent
 from src.agents.claude_agent import ClaudeAgent
 from src.agents.generation import GenerationConfig
@@ -61,13 +62,20 @@ class SandboxError(ValueError):
     """A request the sandbox refuses, with a message fit for the visitor."""
 
 
+class BusyError(SandboxError):
+    """A run is already in progress (sandbox or Agent Lab); nothing was created."""
+
+
 def info() -> dict:
-    """What the Try-it flow may offer. Key presence only, never key values."""
+    """What the Try-it flow may offer. Key presence only, never key values. In the public demo no
+    provider appears at all: no names, model ids, key variable names or readiness."""
     return {
-        "models": [{"id": k, "label": m["label"], "provider": m["provider"],
-                    "model": APPROVED_SCIENTIFIC[m["cls"].__name__]["model"],
-                    "ready": bool(os.environ.get(m["key"], "").strip()), "key_name": m["key"]}
-                   for k, m in MODELS.items()],
+        **demo.flags(),
+        "models": [] if demo.enabled() else [
+            {"id": k, "label": m["label"], "provider": m["provider"],
+             "model": APPROVED_SCIENTIFIC[m["cls"].__name__]["model"],
+             "ready": bool(os.environ.get(m["key"], "").strip()), "key_name": m["key"]}
+            for k, m in MODELS.items()],
         "max_rounds": APPROVED_MAX_ROUNDS, "max_cost_usd": MAX_COST_USD, "points": POINTS,
         "limits": {"min_resources": MIN_CATS, "max_resources": MAX_CATS, "max_quantity": MAX_QTY},
         "strategies": list(INSTRUCTION_VARIANTS),
@@ -81,6 +89,8 @@ def validate(req) -> dict:
         raise SandboxError("The request must be a JSON object.")
     agents = req.get("agents") or {}
     a, b = agents.get("A"), agents.get("B")
+    if demo.enabled() and (a, b) != (SCRIPTED, SCRIPTED):  # before key checks, before any agent exists
+        raise SandboxError(demo.SCRIPTED_ONLY)
     choices = set(MODELS) | {SCRIPTED}
     if a not in choices or b not in choices:
         raise SandboxError("Choose a supported agent for both seats.")
@@ -252,13 +262,13 @@ def execute(run: Run) -> None:
                                                 prices=APPROVED_PRICES).run())
         run.set(status="finished", thinking=None, result=summarize_result(record, run))
     except NegotiationAborted as exc:
-        run.set(status="stopped", thinking=None, error=explain_abort(exc.reason, exc.detail, exc.actor, cfg))
+        run.set(status="stopped", thinking=None, error=demo.scrub(explain_abort(exc.reason, exc.detail, exc.actor, cfg)))
     except Exception as exc:  # noqa: BLE001 — shown as a safe message; the traceback goes to the server log
         traceback.print_exc()
-        run.set(status="stopped", thinking=None, error={
+        run.set(status="stopped", thinking=None, error=demo.scrub({
             "title": "Unexpected error", "detail": f"{type(exc).__name__}: {exc}",
             "message": "The sandbox stopped this negotiation because of an unexpected server error. "
-                       "Details are in the server log. No research data was modified."})
+                       "Details are in the server log. No research data was modified."}))
     finally:
         save(run)
 
@@ -278,7 +288,10 @@ def start(req, background: bool = True) -> Run:
                            "No negotiation was started.")
     with _guard:
         if _active is not None:
-            raise SandboxError("Another sandbox negotiation is still running. Wait for it to finish.")
+            raise BusyError("Another sandbox negotiation is still running. Wait for it to finish.")
+        if demo.enabled():  # nothing exists yet: a refused start leaves no trace
+            demo.take_start()
+            demo.prune_memory(_runs, demo.RETAIN - 1, None)
         run = _active = Run(cfg)
         _runs[run.id] = run
 
@@ -297,6 +310,8 @@ def start(req, background: bool = True) -> Run:
 def save(run: Run) -> None:
     SANDBOX_DIR.mkdir(exist_ok=True)
     (SANDBOX_DIR / f"{run.id}.json").write_text(json.dumps(run.view(), default=str), encoding="utf-8")
+    if demo.enabled():
+        demo.prune_disk(SANDBOX_DIR, demo.RETAIN, run.id)
 
 
 def get(rid: str) -> Optional[dict]:
@@ -304,15 +319,21 @@ def get(rid: str) -> Optional[dict]:
         return _runs[rid].view()
     path = SANDBOX_DIR / f"{rid}.json"
     if re.fullmatch(r"[0-9a-f]{12}", rid) and path.exists():
-        return json.loads(path.read_text(encoding="utf-8"))
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):  # removed by retention between the check and the read
+            return None
     return None
 
 
 def listing() -> list[dict]:
-    """Finished sandbox runs, newest first, without transcripts."""
-    seen = {r.id: r.view() for r in _runs.values()}
+    """Finished sandbox runs, newest first, without transcripts. Public demo: the newest LISTING_MAX,
+    built from at most that many runs in memory and that many files on disk."""
+    capped = demo.enabled()
+    runs = sorted(_runs.values(), key=lambda r: r.created, reverse=True)[:demo.LISTING_MAX] if capped else _runs.values()
+    seen = {r.id: r.view() for r in runs}
     if SANDBOX_DIR.exists():
-        for p in SANDBOX_DIR.glob("*.json"):
+        for p in demo.newest_reports(SANDBOX_DIR, demo.LISTING_MAX) if capped else SANDBOX_DIR.glob("*.json"):
             if p.stem not in seen:
                 try:
                     seen[p.stem] = json.loads(p.read_text(encoding="utf-8"))
@@ -324,4 +345,5 @@ def listing() -> list[dict]:
         out.append({k: v[k] for k in ("id", "created", "status", "config", "labels", "error")} |
                    {"result": {k: res.get(k) for k in ("outcome", "rounds", "max_rounds", "utility_A", "utility_B",
                                                        "optimal_welfare", "sw", "rwe", "ew", "equitability")} if res else None})
-    return sorted(out, key=lambda v: v["created"], reverse=True)
+    out.sort(key=lambda v: v["created"], reverse=True)
+    return out[:demo.LISTING_MAX] if capped else out

@@ -121,3 +121,23 @@ export function timeAgo(epochSeconds, now = Date.now() / 1000) {
   if (s < 129600) return `${Math.round(s / 3600)} h ago`;
   return `${Math.round(s / 86400)} d ago`;
 }
+
+/** Seconds from a Retry-After header (delta-seconds form only), or null. */
+export function retryAfterSeconds(value) {
+  const s = /^\s*\d{1,5}\s*$/.test(value ?? "") ? Number.parseInt(value, 10) : NaN;
+  return s > 0 ? s : null;
+}
+
+/**
+ * What a visitor reads when the server refuses to start a run. The server's own message for
+ * 4xx answers (it is written for visitors); never the body of a 5xx, which could be technical.
+ */
+export function refusalMessage(status, body, retryAfter = null) {
+  if (status >= 500) return "The server hit a problem and did not start the run. Please try again in a moment.";
+  const said = typeof body?.error === "string" && body.error ? body.error : null;
+  if (status === 429) {
+    const s = retryAfterSeconds(retryAfter);
+    return `${said ?? "Too many runs were started recently."}${s ? ` You can start again in about ${s} s.` : ""}`;
+  }
+  return said ?? `The server refused the request (${status}).`;
+}

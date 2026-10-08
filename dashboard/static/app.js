@@ -1,4 +1,4 @@
-import { CONDITIONS, esc, filterRows, fmt, labStages, mean, modelLabel, OUTCOME_LABEL, OUTCOMES, outcomeShares, pct, phase, registerSlots, short, signed, timeAgo, uniq } from "./lib.js";
+import { CONDITIONS, esc, filterRows, fmt, labStages, mean, modelLabel, OUTCOME_LABEL, OUTCOMES, outcomeShares, pct, phase, refusalMessage, registerSlots, retryAfterSeconds, short, signed, timeAgo, uniq } from "./lib.js";
 import { dataTable, dotPlot, figure, histogram, legend, stackBars } from "./charts.js";
 import { createField } from "./field.js";
 
@@ -41,7 +41,8 @@ const OUT_COLOR = { agreed: "var(--o-agreed)", walked_away: "var(--o-walked)", t
 // Segment label ink chosen per fill so counts stay legible on dark and light fills.
 const OUT_INK = { agreed: "var(--ground)", walked_away: "var(--ink)", timeout: "var(--ink)", invalid_action: "var(--ground)" };
 const famColor = (f) => FAM_COLOR[f] ?? "var(--muted)";
-const st = { draft: null, sbx: null, cmp: null, snap: null, raw: "", filters: {}, dataset: "pilot", evaluator: false, showMeasures: false, phaseKey: null };
+// demo: the server runs the public, scripted-only demo (PUBLIC_DEMO); read once at boot from /api/sandbox/info.
+const st = { demo: false, draft: null, sbx: null, cmp: null, snap: null, raw: "", filters: {}, dataset: "pilot", evaluator: false, showMeasures: false, phaseKey: null };
 const RQ = "Does a structured negotiation instruction strategy change cooperation outcomes when LLM agents negotiate over shared resources with private preferences?";
 let figN = 0;
 const nextFig = () => ++figN;
@@ -165,6 +166,8 @@ function labStatus(s, compact = false, headline = null) {
 }
 
 // ------------------------------------------------------------------ 1. home
+/** The public demo's boundary, stated once and reused: what runs here and what does not. */
+const DEMO_NOTE = notice("info", "info", "<b>Public demo.</b> Both agents are scripted and rule-based, and no AI provider is called: results show how the lab measures a negotiation, not how any AI model performs. Runs are temporary and visible to other visitors. Claude, GPT and your own HTTP agents run in the full lab, on a local server with its own configuration.");
 const heroMedia = () => `<div class="hero-media" aria-hidden="true">
     <video class="hero-video" muted loop playsinline disablepictureinpicture disableremoteplayback tabindex="-1" preload="${reducedMotion() ? "auto" : "metadata"}"${reducedMotion() ? "" : " autoplay"}>
       <source src="${HERO_VIDEO}" type="video/mp4"></video>
@@ -173,7 +176,8 @@ const heroMedia = () => `<div class="hero-media" aria-hidden="true">
 function home(s) {
   const flow = [
     ["Private preferences", "Each agent secretly values the resources differently."],
-    ["Two AI agents", "Claude Sonnet 4.6 and GPT-4.1, one in each seat."],
+    st.demo ? ["Two agents", "In this public demo, two scripted rule-based agents. The research uses Claude Sonnet 4.6 and GPT-4.1."]
+      : ["Two AI agents", "Claude Sonnet 4.6 and GPT-4.1, one in each seat."],
     ["Negotiation", "They take turns making offers, for up to 10 turns."],
     ["Resource split", "An accepted offer decides who gets what."],
     ["Outcome", "Each side's value, and how close the total came to the best possible."],
@@ -181,15 +185,17 @@ function home(s) {
   return `${heroMedia()}
   <header class="hero">
     <div class="hero-copy">
-      <p class="eyebrow">Cooperation Lab · an AI negotiation laboratory</p>
+      <p class="eyebrow">${st.demo ? "Public demo · Cooperation Lab" : "Cooperation Lab · an AI negotiation laboratory"}</p>
       <h1 class="hero-q">Can AI agents cooperate when they don't know what the other agent wants?</h1>
-      <p class="hero-sub">Watch two AI agents negotiate over shared resources with private preferences. Then test whether different negotiation instructions change the outcome.</p>
+      <p class="hero-sub">${st.demo ? "Run controlled negotiations between two scripted agents with private preferences, watch them live, and read the evaluator's analysis of the outcome and behavior."
+        : "Watch two AI agents negotiate over shared resources with private preferences. Then test whether different negotiation instructions change the outcome."}</p>
       <div class="hero-actions">
         <a class="cta" href="#/try">Try a negotiation${icon("chev-r")}</a>
         <a class="chip" href="#/experiments">Explore the research</a>
       </div>
     </div>
   </header>
+  ${st.demo ? DEMO_NOTE : ""}
 
   <section class="block" id="how">${blockHead("How it works")}
     <ol class="flow">${flow.map(([t, d]) => `<li><b>${t}</b><span>${d}</span></li>`).join("")}</ol>
@@ -202,11 +208,13 @@ function home(s) {
   <section class="block">${blockHead("Three ways to use the lab")}
     <div class="modes">
       <a class="mode" href="#/try"><span class="kicker">Try it · sandbox</span><h3>Run your own negotiation</h3>
-        <p>Choose the resources, each agent's private preferences and the negotiation instructions, then watch the two models negotiate live.</p>
+        <p>${st.demo ? "Choose the resources and each agent's private preferences, then watch two scripted agents negotiate live."
+          : "Choose the resources, each agent's private preferences and the negotiation instructions, then watch the two models negotiate live."}</p>
         <p class="note">Sandbox experiments are interactive explorations and are not included in the reported research results.</p>
         <span class="go">Try a negotiation${icon("chev-r")}</span></a>
-      <a class="mode" href="#/lab"><span class="kicker">Agent Lab · bring your agents</span><h3>Evaluate two agents</h3>
-        <p>Connect your own agent over HTTP, or use a built-in one, and run it against another through the same scenarios, with seats and first move balanced. Every score is computed by the evaluator.</p>
+      <a class="mode" href="#/lab"><span class="kicker">Agent Lab · ${st.demo ? "scripted demo" : "bring your agents"}</span><h3>Evaluate two agents</h3>
+        <p>${st.demo ? "Run two scripted agents through up to 12 hidden scenarios, with seats and first move balanced, and read the evaluator's report. Every score is computed by the evaluator."
+          : "Connect your own agent over HTTP, or use a built-in one, and run it against another through the same scenarios, with seats and first move balanced. Every score is computed by the evaluator."}</p>
         <p class="note">Exploratory: stored apart from the research results, and never ranks agents.</p>
         <span class="go">Open the Agent Lab${icon("chev-r")}</span></a>
       <a class="mode" href="#/experiments"><span class="kicker">Research · controlled experiment</span><h3>See the controlled experiment</h3>
@@ -228,7 +236,8 @@ const PREVIEW = {
   ],
 };
 function preview() {
-  const who = { A: ["Agent A", "Claude Sonnet 4.6", "claude"], B: ["Agent B", "GPT-4.1", "openai"] };
+  const who = st.demo ? { A: ["Agent A", "Seat A", "seatA"], B: ["Agent B", "Seat B", "seatB"] }  // the demo names no model it does not run
+    : { A: ["Agent A", "Claude Sonnet 4.6", "claude"], B: ["Agent B", "GPT-4.1", "openai"] };
   const split = (a) => Object.entries(PREVIEW.pool).map(([c, q]) => `<span>${esc(c)}: A <b>${a[c]}</b> · B <b>${q - a[c]}</b></span>`).join("");
   return `<div class="preview" aria-label="Illustrative example, not experimental data">
     <div class="ex-banner" role="note">${icon("alert")}Illustrative example — not experimental data</div>
@@ -247,8 +256,27 @@ const STRAT = {
   structured_v1: ["Structured", "Agents receive additional structured guidance for preference revelation, integrative trades, and disagreement/deadline reasoning."],
 };
 const RES_NAME = /^[a-z][a-z-]{0,19}$/;
+/** Public demo: scripted agents never read instructions, so a run is never labelled with a strategy. */
+const NO_STRATEGY = "Scripted agents · instructions not used";
 const newDraft = () => ({ mode: "ai", agents: { A: "claude", B: "openai" }, first: "A", strategy: "structured_v1",
   pool: [["apples", 10], ["books", 8], ["tickets", 6]], points: { A: [50, 30, 20], B: [10, 30, 60] } });
+/** POSTs a start request; resolves to the new id, or throws an Error a visitor can read
+ *  (err.wait: seconds the server asked to wait before the next start, on 429). */
+async function startRun(url, body) {
+  let res;
+  try { res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }); }
+  catch { throw new Error(st.demo ? "The server could not be reached. Check your connection, then try again." : "The server could not be reached. Check that it is still running, then try again."); }
+  const out = await res.json().catch(() => ({}));
+  if (!res.ok) throw Object.assign(new Error(refusalMessage(res.status, out, res.headers.get("Retry-After"))),
+    { wait: res.status === 429 ? retryAfterSeconds(res.headers.get("Retry-After")) : null });
+  return out.id;
+}
+/** Re-enables a start button, after counting down `wait` seconds if the server asked for a pause. */
+function release(btn, label, wait = null) {
+  if (!wait) { btn.disabled = false; btn.innerHTML = label; return; }
+  btn.disabled = true; btn.textContent = `Try again in ${wait} s`;
+  later(() => release(btn, label, wait - 1), 1000);
+}
 const getJSON = async (url) => { const r = await fetch(url, { cache: "no-store" }); if (!r.ok) throw new Error(`${url} ${r.status}`); return r.json(); };
 const seatKind = (d, r) => (d.mode === "scripted" ? "scripted" : d.agents[r]);
 const seatLabel = (d, r) => (d.mode === "scripted" ? `Scripted test agent ${r}` : st.sbx?.models.find((m) => m.id === d.agents[r])?.label ?? d.agents[r]);
@@ -277,8 +305,8 @@ function stepProblem(d, step) {
 /** Why Start is unavailable, or null. */
 function startBlocker(d) {
   if (st.sbx.busy) return "Another sandbox negotiation is still running on this server. Wait for it to finish, then start yours.";
-  if (d.mode === "ai") {
-    const missing = [...new Set("AB".split("").map((r) => st.sbx.models.find((m) => m.id === d.agents[r])).filter((m) => !m.ready).map((m) => m.key_name))];
+  if (d.mode === "ai" && !st.demo) {
+    const missing = [...new Set("AB".split("").map((r) => st.sbx.models.find((m) => m.id === d.agents[r])).filter((m) => m && !m.ready).map((m) => m.key_name))];
     if (missing.length) return `The server is missing ${missing.map((k) => `<code>${k}</code>`).join(" and ")}. Add ${missing.length > 1 ? "them" : "it"} to <code>.env</code> and restart the server, or choose <b>Scripted test agents</b> in step 1 to try the flow offline.`;
   }
   return null;
@@ -287,18 +315,19 @@ function startBlocker(d) {
 async function tryit(s, arg) {
   st.sbx = await getJSON("/api/sandbox/info");
   const d = (st.draft ??= newDraft());
+  if (st.demo || !st.sbx.models.length) d.mode = "scripted"; // no provider is offered: scripted is the only choice
   let step = Math.min(5, Math.max(1, Number.parseInt(arg, 10) || 1));
   const stuck = [2, 3].find((k) => k < step && stepProblem(d, k));
   if (stuck) step = stuck; // no skipping past a step that still needs fixing
   const body = [null, tryAgents, tryResources, tryPreferences, tryStrategy, tryReview][step](d, s);
   const blocker = step === 5 ? startBlocker(d) : null;
-  return `${head("Try a negotiation", "Set up one negotiation between two agents, then watch it happen live.")}
-  ${sandboxNote}
+  return `${head("Try a negotiation", st.demo ? "Set up one negotiation between two scripted agents, then watch it happen live." : "Set up one negotiation between two agents, then watch it happen live.")}
+  ${st.demo ? DEMO_NOTE : sandboxNote}
   <ol class="stepper" aria-label="Setup progress">${STEPS.map((t, i) => { const k = i + 1, cls = k < step ? "done" : k === step ? "now" : "";
     return `<li class="${cls}">${k < step ? `<a href="#/try/${k}">` : "<span>"}<i>${k < step ? icon("check") : k}</i>${t}${k < step ? "</a>" : "</span>"}</li>`; }).join("")}</ol>
   <section class="stepcard" aria-labelledby="step-title">
     <p class="stepno">Step ${step} of ${STEPS.length}</p>
-    <h2 id="step-title">${["", "Who negotiates?", "What are the agents dividing?", "What does each agent want?", "How should the agents negotiate?", "Review and start"][step]}</h2>
+    <h2 id="step-title">${["", "Who negotiates?", "What are the agents dividing?", "What does each agent want?", st.demo ? "Negotiation instructions (not used by scripted agents)" : "How should the agents negotiate?", "Review and start"][step]}</h2>
     ${stuck ? notice("warn", "alert", "Fix this step before moving on.") : ""}
     ${body}
     ${blocker ? notice("warn", "alert", blocker) : ""}
@@ -317,6 +346,11 @@ function tryAgents(d) {
         : `<label class="field"><span>Model</span><select data-agent="${r}">${opt(r)}</select></label>
       <p class="note">${esc(m.provider)} · <code>${esc(m.model)}</code></p>
       <p class="keystate ${m.ready ? "ok" : "no"}">${icon(m.ready ? "check" : "alert")}${m.ready ? "Ready on this server" : `Needs ${esc(m.key_name)} in .env`}</p>`}</div>`; };
+  if (st.demo || !st.sbx.models.length) return `<p class="lead">Agent A and Agent B are negotiation seats. In this public demo both are scripted test agents: simple rule-based agents, not AI. They make no API calls and cost nothing.</p>
+    <div class="seats2">${seat("A")}<div class="vs" aria-hidden="true">${icon("swap")}</div>${seat("B")}</div>
+    <fieldset class="choice inline"><legend>Who makes the first offer?</legend>
+      ${["A", "B"].map((r) => `<label class="opt"><input type="radio" name="first" value="${r}"${d.first === r ? " checked" : ""}><span><b>Agent ${r}</b></span></label>`).join("")}</fieldset>
+    <p class="note">The research runs Claude Sonnet 4.6 and GPT-4.1 with locked settings. They are not available in the public demo.</p>`;
   return `<p class="lead">Agent A and Agent B are negotiation seats. A model can occupy either seat.</p>
     <fieldset class="choice"><legend>What should negotiate?</legend>
       <label class="opt"><input type="radio" name="mode" value="ai"${d.mode === "ai" ? " checked" : ""}><span><b>AI models</b><small>Claude Sonnet 4.6 and GPT-4.1, the two models of the research experiment, with its locked settings. Runs on the server with its API keys; at most $${st.sbx.max_cost_usd.toFixed(2)} per negotiation.</small></span></label>
@@ -360,7 +394,8 @@ function tryStrategy(d, s) {
     ${Object.entries(STRAT).map(([k, [name, text]]) => `<label class="opt c-${k}"><input type="radio" name="strategy" value="${k}"${d.strategy === k ? " checked" : ""}><span><b>${name}</b><small>${text}</small></span></label>`).join("")}
     </fieldset>
     <p class="lead">The negotiation rules stay the same. Only the instructions given to the agents change.</p>
-    ${d.mode === "scripted" ? notice("warn", "alert", "Scripted test agents follow fixed rules and never read instructions, so the strategy can&#39;t change what they do. Choose <b>AI models</b> in step 1 to see its effect.") : ""}
+    ${d.mode === "scripted" ? notice("warn", "alert", st.demo ? "Scripted test agents follow fixed rules and never read instructions, so in this demo the strategy is only a label on the run. In the research, AI models receive these instructions."
+      : "Scripted test agents follow fixed rules and never read instructions, so the strategy can&#39;t change what they do. Choose <b>AI models</b> in step 1 to see its effect.") : ""}
     <details class="more"><summary>Show the exact instructions the structured strategy adds</summary><pre class="prompt">${esc(s.setup.structured_block)}</pre></details>`;
 }
 
@@ -371,12 +406,17 @@ function tryReview(d) {
       <div><dt>Resources</dt><dd>${d.pool.map(([n, q]) => `${q} ${esc(n)}`).join(" · ")}</dd></div>
       <div><dt>Private preferences</dt><dd>${icon("check")} Configured, and hidden from the other agent
         <span class="sub">A: ${d.pool.map(([n], i) => `${esc(n)} ${d.points.A[i]}`).join(", ")} · B: ${d.pool.map(([n], i) => `${esc(n)} ${d.points.B[i]}`).join(", ")}</span></dd></div>
-      <div><dt>Strategy</dt><dd>${STRAT[d.strategy][0]}<span class="sub">${d.strategy === "structured_v1" ? "Structured negotiation instruction strategy" : "Baseline instructions"}</span></dd></div>
+      <div><dt>Strategy</dt><dd>${st.demo ? `Not used<span class="sub">Scripted agents never read instructions: this run measures the negotiation, it does not test a strategy</span>`
+        : `${STRAT[d.strategy][0]}<span class="sub">${d.strategy === "structured_v1" ? "Structured negotiation instruction strategy" : "Baseline instructions"}</span>`}</dd></div>
       <div><dt>Rounds</dt><dd>Up to ${st.sbx.max_rounds} turns<span class="sub">Locked, as in the experiment</span></dd></div>
       <div><dt>Cost</dt><dd>${ai ? `At most $${st.sbx.max_cost_usd.toFixed(2)}` : "None"}<span class="sub">${ai ? "Hard cap per sandbox run, charged to the server's API keys" : "Scripted agents make no API calls"}</span></dd></div>
     </dl>
     ${notice("info", "info", "This sandbox run is exploratory and is not included in the reported research experiment.")}`;
 }
+
+/** Why a report id finds nothing: in the public demo, older runs are deleted to keep the server small. */
+const goneNote = (what) => st.demo ? `This ${what} doesn't exist on this server. Public demo runs are temporary: older ones are deleted, and a server restart may clear them all.`
+  : `This ${what} doesn't exist on this server.`;
 
 // ------------------------------------------------------------------ 3. live negotiation
 const runN = (run, r = run.result ?? {}) => ({ ...r, ...(run.config.agents.A === run.config.agents.B ? { family_A: "seatA", family_B: "seatB" } : { family_A: run.config.agents.A, family_B: run.config.agents.B }),
@@ -402,7 +442,7 @@ const OUT_HEAD = { agreed: "Agreement reached", timeout: "No agreement: the dead
 
 async function liveView(s, id) {
   const res = await fetch(`/api/sandbox/runs/${encodeURIComponent(id)}`, { cache: "no-store" });
-  if (!res.ok) return `${head("Negotiation not found", "This sandbox negotiation doesn't exist on this server.")}<a class="cta" href="#/try">Try a negotiation${icon("chev-r")}</a>`;
+  if (!res.ok) return `${head("Negotiation not found", goneNote("sandbox negotiation"))}<a class="cta" href="#/try">Try a negotiation${icon("chev-r")}</a>`;
   const run = await res.json();
   if (run.status === "finished") return resultView(s, id, run);
   st.liveRun = run;
@@ -417,7 +457,7 @@ async function liveView(s, id) {
     <div><span class="lb-k">Negotiation</span><b id="lb-round">Round 0 / ${run.max_rounds}</b></div>
     <div><span class="lb-k">Status</span><b id="lb-state" class="lb-state running"><i></i>In progress</b></div>
     <div class="lb-now"><span class="lb-k">Now</span><b id="lb-now">Connecting to Agent ${run.config.first_mover}…</b></div>
-    <div><span class="lb-k">Strategy</span><b>${STRAT[run.config.strategy][0]}</b></div>
+    ${st.demo ? `<div><span class="lb-k">Agents</span><b>Scripted, rule-based</b></div>` : `<div><span class="lb-k">Strategy</span><b>${STRAT[run.config.strategy][0]}</b></div>`}
     <div class="lb-prop"><span class="lb-k">On the table · A–B</span><b id="lb-prop">No offer yet</b></div>
   </header>
   <p class="note">${icon("info")} Sandbox run: exploratory, not part of the reported research. Messages appear when each agent's full turn arrives; nothing is streamed or invented in between.</p>
@@ -512,7 +552,7 @@ function finishLive(run) {
 async function resultView(s, id, run = null) {
   if (!run) {
     const res = await fetch(`/api/sandbox/runs/${encodeURIComponent(id)}`, { cache: "no-store" });
-    if (!res.ok) return `${head("Result not found", "This sandbox negotiation doesn't exist on this server.")}<a class="cta" href="#/try">Try a negotiation${icon("chev-r")}</a>`;
+    if (!res.ok) return `${head("Result not found", goneNote("sandbox negotiation"))}<a class="cta" href="#/try">Try a negotiation${icon("chev-r")}</a>`;
     run = await res.json();
   }
   if (run.status !== "finished") return liveView(s, id);
@@ -527,7 +567,7 @@ async function resultView(s, id, run = null) {
   const turns = r.events.map((e, i) => { const h = turnRow(e, n, i, prev); if (e.action === "OFFER" && e.allocation) prev = e.allocation; return h; }).join("");
   return `<a class="back" href="#/try">${icon("chev-l")}Try a negotiation</a>
   <header class="result-head ${agreed ? "ok" : "no"}"><span class="res-icon">${icon(agreed ? "check" : "x")}</span>
-    <div><p class="eyebrow">Sandbox result · ${STRAT[run.config.strategy][0]} instructions</p><h1>${OUT_HEAD[r.outcome]}</h1>
+    <div><p class="eyebrow">${st.demo ? `Public demo result · ${NO_STRATEGY}` : `Sandbox result · ${STRAT[run.config.strategy][0]} instructions`}</p><h1>${OUT_HEAD[r.outcome]}</h1>
     <p class="standfirst">${agreed ? `After ${r.rounds} of ${r.max_rounds} turns, Agent ${r.events.at(-1).actor} accepted the offer on the table.`
       : r.outcome === "timeout" ? `No offer was accepted within ${r.max_rounds} turns, so nothing was divided and both agents score 0.`
       : r.outcome === "walked_away" ? `Agent ${r.events.at(-1).actor} walked away on turn ${r.rounds}, so nothing was divided and both agents score 0.`
@@ -561,9 +601,10 @@ async function resultView(s, id, run = null) {
   <section class="block">${blockHead("The negotiation, turn by turn")}
     <div class="tl" id="timeline" data-outcome="${esc(r.outcome)}">${turns}${verdictRow(n, r.events.length)}</div></section>
 
+  ${st.demo ? notice("warn", "alert", "<b>Scripted agents.</b> Both agents follow fixed rules and ignore the instructions. This result shows how the lab measures a negotiation, not how an AI model negotiates.") : ""}
   <nav class="whatnext" aria-label="What next">
     <a class="cta" href="#/try/1" data-again>Run another negotiation${icon("chev-r")}</a>
-    <a class="btn" href="#/try/5" data-flip="${other}">Try the ${STRAT[other][0].toLowerCase()} strategy on the same setup</a>
+    ${st.demo ? "" : `<a class="btn" href="#/try/5" data-flip="${other}">Try the ${STRAT[other][0].toLowerCase()} strategy on the same setup</a>`}
     <a class="btn" href="#/compare">Compare results</a>
     <a class="btn" href="#/experiments">Explore the research</a>
   </nav>
@@ -581,7 +622,8 @@ function draftFrom(run, strategy = run.config.strategy) {
 // ------------------------------------------------------------------ 5. compare (sandbox runs)
 async function compare() {
   const runs = (await getJSON("/api/sandbox/runs")).filter((r) => r.status === "finished" && r.result);
-  const top = head("Compare", "Put two of your sandbox negotiations side by side, for example the same setup under the baseline and the structured instructions.");
+  const top = head("Compare", st.demo ? "Put two public demo negotiations side by side, for example the same setup with different private preferences or opening seat."
+    : "Put two of your sandbox negotiations side by side, for example the same setup under the baseline and the structured instructions.");
   if (!runs.length) return `${top}<div class="empty"><h2>No sandbox negotiations yet</h2><p>Run one, then run the same setup with the other strategy, and compare them here.</p><a class="cta" href="#/try">Try a negotiation${icon("chev-r")}</a>
     <p class="note">Looking for the research comparison? <a href="#/structured">Structured vs baseline</a> shows the controlled experiment, once it has data.</p></div>`;
   const byId = (st.cmpRuns = new Map(runs.map((r) => [r.id, r])));
@@ -592,20 +634,22 @@ async function compare() {
   const [L, R] = st.cmp.map((id) => byId.get(id) ?? null);
   const scripted = [L, R].some((r) => r?.config.agents.A === "scripted");
   const when = (t) => new Date(t * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  const name = (r) => `${STRAT[r.config.strategy][0]} · ${r.labels.A} vs ${r.labels.B} · ${OUTCOME_LABEL[r.result.outcome]} · ${when(r.created)}`;
+  const name = (r) => `${st.demo ? "" : `${STRAT[r.config.strategy][0]} · `}${r.labels.A} vs ${r.labels.B} · ${OUTCOME_LABEL[r.result.outcome]} · ${when(r.created)}`;
   const pick = (k) => `<label class="field"><span>${k ? "Right" : "Left"}</span><select data-cmp="${k}">${runs.map((r) => `<option value="${r.id}"${st.cmp[k] === r.id ? " selected" : ""}>${esc(name(r))}</option>`).join("")}</select></label>`;
   const same = L && R && JSON.stringify([L.config.pool, L.config.points, L.config.agents, L.config.first_mover]) === JSON.stringify([R.config.pool, R.config.points, R.config.agents, R.config.first_mover]);
   const v = (r) => r.result, row = (label, f, bar) => `<tr><th scope="row">${label}</th>${[L, R].map((r) => `<td class="num">${r ? f(v(r)) : "—"}${r && bar ? `<span class="cbar" aria-hidden="true"><i style="--w:${Math.max(0, Math.min(1, bar(v(r))))}"></i></span>` : ""}</td>`).join("")}</tr>`;
   return `${top}
   ${notice("warn", "alert", "<b>Exploratory sandbox comparison.</b> These are actual sandbox runs, not controlled research findings. One run per strategy can't show that a strategy works better: model answers vary from run to run.")}
   <div class="filters">${pick(0)}${runs.length > 1 ? pick(1) : ""}</div>
-  ${!R ? notice("info", "info", `Only one finished run so far. <a href="#/try/5" data-flip-id="${L.id}">Run the same setup with the ${STRAT[L.config.strategy === "structured_v1" ? "baseline_v1" : "structured_v1"][0].toLowerCase()} strategy</a> to compare.`) : ""}
-  ${scripted ? notice("warn", "alert", "<b>Scripted test agents never read the instructions.</b> A scripted run's strategy is only a label on its configuration, so this comparison is not evidence that one strategy performs better. Use AI models for that.") : ""}
+  ${!R && st.demo ? notice("info", "info", `Only one finished run so far. <a href="#/try">Run another negotiation</a> to compare.`) : ""}
+  ${!R && !st.demo ? notice("info", "info", `Only one finished run so far. <a href="#/try/5" data-flip-id="${L.id}">Run the same setup with the ${STRAT[L.config.strategy === "structured_v1" ? "baseline_v1" : "structured_v1"][0].toLowerCase()} strategy</a> to compare.`) : ""}
+  ${scripted ? notice("warn", "alert", `<b>Scripted test agents never read the instructions.</b> A scripted run's strategy is only a label on its configuration, so this comparison is not evidence that one strategy performs better. ${st.demo ? "AI models are not available in the public demo." : "Use AI models for that."}`) : ""}
+  ${st.demo ? notice("", "info", "Public demo: this list shows the most recent runs on this server, including other visitors'. Runs are temporary.") : ""}
   ${L && R ? same ? notice("info", "check", L.config.strategy === R.config.strategy ? "Same setup and same strategy: any difference comes from the models' variability."
       : scripted ? "Same agents, resources and preferences. The configurations differ only in the instruction setting, which these scripted agents ignore."
       : "Same agents, resources and preferences: only the instructions differ.")
     : notice("warn", "alert", "These runs used different agents, resources, preferences or opening seat, so a difference isn't only due to the strategy.") : ""}
-  <div class="table-wrap"><table class="cmp"><thead><tr><th></th>${[L, R].map((r) => `<th class="num">${r ? `<span class="tag c-${r.config.strategy}">${STRAT[r.config.strategy][0]}</span>` : "—"}</th>`).join("")}</tr></thead><tbody>
+  <div class="table-wrap"><table class="cmp"><thead><tr><th></th>${[L, R].map((r) => `<th class="num">${!r ? "—" : st.demo ? `Run from ${when(r.created)}` : `<span class="tag c-${r.config.strategy}">${STRAT[r.config.strategy][0]}</span>`}</th>`).join("")}</tr></thead><tbody>
     ${row("Agreement", (x) => (x.outcome === "agreed" ? `${icon("check")} Reached` : `${icon("x")} ${OUTCOME_LABEL[x.outcome]}`))}
     ${row("Turns used", (x) => `${x.rounds} / ${x.max_rounds}`, (x) => x.rounds / x.max_rounds)}
     ${row("Agent A's score", (x) => fmt(x.utility_A, 1), (x) => x.utility_A / 100)}
@@ -614,7 +658,7 @@ async function compare() {
     ${row("Efficiency", (x) => pct(x.rwe, 1), (x) => x.rwe)}
     ${row("How the worse-off agent did", (x) => fmt(x.ew), (x) => x.ew)}
   </tbody></table></div>
-  <div class="actions">${[L, R].filter(Boolean).map((r) => `<a class="btn" href="#/result/${r.id}">Open the ${STRAT[r.config.strategy][0].toLowerCase()} run</a>`).join("")}<a class="cta" href="#/try">Run another${icon("chev-r")}</a></div>
+  <div class="actions">${[L, R].filter(Boolean).map((r) => `<a class="btn" href="#/result/${r.id}">${st.demo ? `Open the run from ${when(r.created)}` : `Open the ${STRAT[r.config.strategy][0].toLowerCase()} run`}</a>`).join("")}<a class="cta" href="#/try">Run another${icon("chev-r")}</a></div>
   <p class="note" style="margin-top:18px">For evidence, see the controlled experiment: <a href="#/structured">Structured vs baseline</a> compares the two strategies over hundreds of preregistered negotiations once they are recorded.</p>`;
 }
 
@@ -656,10 +700,11 @@ async function labView(s, arg) {
   st.sbx = await getJSON("/api/sandbox/info");
   const [info, past] = await Promise.all([getJSON("/api/lab/info"), getJSON("/api/lab/evaluations")]);
   const d = (st.lab ??= newLab());
+  if (st.demo) for (const id of "XY") if (d.agents[id].kind !== "scripted") d.agents[id] = labAgent(); // scripted is the only agent here
   const problem = labProblem(d, info), n = d.blocks * 4, scripted = ["X", "Y"].every((id) => d.agents[id].kind === "scripted");
   const card = (id) => { const a = d.agents[id], p = d.probe[id];
     return `<div class="seatcard m-${id === "X" ? "seatA" : "seatB"}"><div class="sc-head"><b>Agent ${id}</b></div>
-      <label class="field"><span>Agent</span><select data-lab-kind="${id}">${LAB_KINDS.map(([k, t]) => `<option value="${k}"${a.kind === k ? " selected" : ""}${k === "gemini" || k === "ollama" ? " disabled" : ""}>${esc(t)}</option>`).join("")}</select></label>
+      ${st.demo ? `<p class="sc-model">Scripted test agent</p>` : `<label class="field"><span>Agent</span><select data-lab-kind="${id}">${LAB_KINDS.map(([k, t]) => `<option value="${k}"${a.kind === k ? " selected" : ""}${k === "gemini" || k === "ollama" ? " disabled" : ""}>${esc(t)}</option>`).join("")}</select></label>`}
       ${a.kind === "scripted" ? `<p class="note">Rule-based test agent: asks for a large share, concedes a little each turn. Ignores instructions; not AI.</p>` : ""}
       ${["claude", "openai"].includes(a.kind) ? (() => { const m = st.sbx.models.find((x) => x.id === a.kind);
         return `<p class="note">${esc(m.provider)} · <code>${esc(m.model)}</code>, locked research settings. Called by the server with its own key; calls stop once $2 is reached for the evaluation (the last call may go slightly over).</p>
@@ -670,24 +715,27 @@ async function labView(s, arg) {
         <p class="note">Used for this evaluation only: kept in server memory, never stored, never shown again, never sent to the other agent. Over an <code>http://</code> address to another machine it travels unencrypted.</p>
         <div class="actions"><button class="btn" type="button" data-probe="${id}">Test connection</button></div>
         ${p ? `<p class="keystate ${p.ok ? "ok" : "no"}" role="status">${icon(p.ok ? "check" : "alert")}${p.ok ? `Answered ${esc(p.action)} in ${fmt(p.latency_s, 2)} s to a synthetic test turn.` : `${esc(p.title)}: ${esc(p.message)}`}</p>` : ""}` : ""}</div>`; };
-  return `${head("Agent Lab", "Bring two agents, run them through controlled hidden scenarios with seats and first move balanced, and read what the evaluator measured.")}
+  return `${head("Agent Lab", st.demo ? "Run two scripted agents through controlled hidden scenarios with seats and first move balanced, and read what the evaluator measured."
+    : "Bring two agents, run them through controlled hidden scenarios with seats and first move balanced, and read what the evaluator measured.")}
+  ${st.demo ? DEMO_NOTE : ""}
   ${notice("warn", "alert", "<b>Exploratory evaluation.</b> Agent Lab runs are stored apart from the research data and are never part of the controlled experiment's results. The lab measures; it does not rank agents.")}
   ${info.sealed ? notice("", "info", `<b>An evaluation is running.</b> ${SEALED_NOTE}`) : ""}
   <section class="block">${blockHead("Who knows what")}
     <div class="knows"><div><h3>Each agent is sent</h3><p>The shared pool, its <b>own</b> private points, the public transcript, the round and the deadline. Nothing else.</p></div>
     <div><h3>Kept from every agent</h3><p>The other agent's points and the best possible split. Scenarios come from seeds keyed with the server's secret, so they cannot be reconstructed, and no agent ever negotiates the same scenario twice.</p></div>
     <div><h3>The evaluator knows</h3><p>Everything: both private valuations and the best possible split, so every score below is computed, not judged.</p></div></div>
-    <details class="more"><summary>What the lab cannot prevent</summary>
-      <p class="note">An agent running on this computer could read the lab's files and settings: run agents you do not trust on another machine. Each agent meets the same opponent in every negotiation, so an adaptive agent can learn how its opponent behaves; the negotiations are not independent for such agents. Two endpoints run by one operator could coordinate outside the lab.</p></details></section>
+    ${st.demo ? "" : `<details class="more"><summary>What the lab cannot prevent</summary>
+      <p class="note">An agent running on this computer could read the lab's files and settings: run agents you do not trust on another machine. Each agent meets the same opponent in every negotiation, so an adaptive agent can learn how its opponent behaves; the negotiations are not independent for such agents. Two endpoints run by one operator could coordinate outside the lab.</p></details>`}</section>
 
   <section class="stepcard" aria-labelledby="lab-agents"><h2 id="lab-agents">1 · Agents</h2>
     <div class="seats2">${card("X")}<div class="vs" aria-hidden="true">${icon("swap")}</div>${card("Y")}</div>
-    <details class="more"><summary>Connecting your own agent: the HTTP contract</summary>
+    ${st.demo ? `<p class="note">The full Agent Lab can also evaluate Claude Sonnet 4.6, GPT-4.1 and your own agent over HTTP. It runs on a local server with its own configuration, not in this public demo.</p>`
+      : `<details class="more"><summary>Connecting your own agent: the HTTP contract</summary>
       <p class="note">Each turn the server POSTs your agent's observation as JSON (<code>contract: negotiation-lab/1</code>): <code>role</code>, <code>resource_pool</code>, <code>own_valuation</code>, <code>round</code>, <code>max_rounds</code>, <code>rounds_remaining</code>, <code>is_final_round</code>, <code>allowed_actions</code>, <code>standing_offer</code>, <code>transcript</code>, and the exact <code>instructions</code> and <code>prompt</code> the research models receive. The whole reply must arrive within 20 s and be at most 64 KiB:</p>
       <pre class="prompt">{"action_type": "OFFER" | "ACCEPT" | "WALK_AWAY",
  "allocation": {"widgets": 12, "gadgets": 5, "components": 30},   // units YOU get, OFFER only
  "message": "short public message"}</pre>
-      <p class="note">The engine validates every reply: an unreadable reply or an impossible split ends that negotiation as an invalid action. No reply (network error, timeout, HTTP error) is an <b>agent failure</b>: counted against that agent, never turned into a negotiation outcome, and its block is left out of every aggregate. A reference agent ships with the lab: <code>python -m lab.example_http_agent --port 8900</code>. Only a URL is accepted: no code is uploaded or run.</p></details>
+      <p class="note">The engine validates every reply: an unreadable reply or an impossible split ends that negotiation as an invalid action. No reply (network error, timeout, HTTP error) is an <b>agent failure</b>: counted against that agent, never turned into a negotiation outcome, and its block is left out of every aggregate. A reference agent ships with the lab: <code>python -m lab.example_http_agent --port 8900</code>. Only a URL is accepted: no code is uploaded or run.</p></details>`}
   </section>
 
   <section class="stepcard" aria-labelledby="lab-env"><h2 id="lab-env">2 · Environment</h2>
@@ -696,6 +744,7 @@ async function labView(s, arg) {
       <label class="field"><span>Resource types</span><input type="number" data-lab-num="categories" value="${esc(d.categories)}" min="2" max="5" step="1"></label></div>
     <p class="note">A block is 4 negotiations, each on its own hidden scenario drawn by the server with the research generators: each agent sits in seat A twice and in seat B twice, and each seat moves first once. The four run in a random order. Rules are the research rules: up to ${st.sbx.max_rounds} turns, nothing is divided without agreement.</p>
     <p class="lead" id="lab-count">${n} negotiations on ${n} different hidden scenarios (${d.blocks} block${d.blocks === 1 ? "" : "s"} of 4).</p>
+    ${st.demo ? `<p class="note">The public demo runs at most ${info.max_blocks} blocks (${info.max_blocks * 4} negotiations) per evaluation.</p>` : ""}
   </section>
 
   <section class="stepcard" aria-labelledby="lab-strat"><h2 id="lab-strat">3 · Instructions</h2>
@@ -711,7 +760,7 @@ async function labView(s, arg) {
     <div class="stepnav"><span></span><button class="cta" type="button" id="lab-start"${problem ? " disabled" : ""}>Run ${n} negotiations${icon("chev-r")}</button></div>
   </section>
 
-  <section class="block">${blockHead("Past evaluations", "Exploratory; stored under sandbox_runs/lab/")}
+  <section class="block">${blockHead("Past evaluations", st.demo ? "The most recent on this server, including other visitors'. Temporary." : "Exploratory; stored under sandbox_runs/lab/")}
     ${past.length ? `<div class="table-wrap"><table><thead><tr><th>When</th><th>Agent X</th><th>Agent Y</th><th class="num">Negotiations</th><th class="num">Complete blocks</th><th class="num">Agreed</th><th>Status</th></tr></thead><tbody>
       ${past.map((e) => `<tr><td><a href="#/lab/${e.id}">${new Date(e.created * 1000).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}</a></td><td>${labName(labAgents(e.agents)?.X)}</td><td>${labName(labAgents(e.agents)?.Y)}</td>
         <td class="num">${e.finished}${e.aborted ? ` <span class="sub">+${e.aborted} aborted</span>` : ""} / ${e.planned}</td><td class="num">${e.complete_blocks ?? "—"} / ${e.blocks ?? "—"}</td><td class="num">${e.sealed ? "sealed" : pct0(e.agreed)}</td><td>${esc(e.status)}</td></tr>`).join("")}</tbody></table></div>`
@@ -720,13 +769,13 @@ async function labView(s, arg) {
 
 async function labReport(id) {
   const res = await fetch(`/api/lab/evaluations/${encodeURIComponent(id)}`, { cache: "no-store" });
-  if (!res.ok) return `${head("Evaluation not found", "No Agent Lab evaluation has this ID on this server.")}<a class="cta" href="#/lab">Agent Lab${icon("chev-r")}</a>`;
+  if (!res.ok) return `${head("Evaluation not found", st.demo ? goneNote("evaluation") : "No Agent Lab evaluation has this ID on this server.")}<a class="cta" href="#/lab">Agent Lab${icon("chev-r")}</a>`;
   const ev = await res.json();
   st.labEval = ev;
   const A = labAgents(ev.agents), cfg = ev.config ?? {};
   const strategy = ev.strategy ?? cfg.strategy, blocks = ev.blocks ?? cfg.scenario?.blocks, k = ev.categories ?? cfg.scenario?.categories;
   const top = `<a class="back" href="#/lab">${icon("chev-l")}Agent Lab</a>
-  <header class="page-head"><p class="eyebrow">Agent Lab · exploratory evaluation · ${esc(STRAT[strategy]?.[0] ?? strategy)} instructions</p><h1>${esc(`${A.X.label} vs ${A.Y.label}`)}</h1>
+  <header class="page-head"><p class="eyebrow">${st.demo ? `Agent Lab · public demo evaluation · ${NO_STRATEGY}` : `Agent Lab · exploratory evaluation · ${esc(STRAT[strategy]?.[0] ?? strategy)} instructions`}</p><h1>${esc(`${A.X.label} vs ${A.Y.label}`)}</h1>
     <p class="standfirst">${blocks} block${blocks === 1 ? "" : "s"} × 4 negotiations = ${ev.planned}, each on its own hidden scenario (${k} resource types), with seats and first move balanced in every block.</p></header>`;
   if (ev.sealed && !ev.trials) return `${top}
     <div class="empty"><h2>Sealed while another evaluation runs</h2><p>${SEALED_NOTE}</p><p>This report opens as soon as that evaluation ends.</p></div>`;
@@ -877,14 +926,12 @@ function wireLab(arg) {
   start?.addEventListener("click", async () => {
     start.disabled = true; start.textContent = "Starting…"; say(null);
     try {
-      const r = await fetch("/api/lab/evaluations", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(labBody(d)) });
-      const out = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(out.error ?? `The server refused the request (${r.status}).`);
-      for (const id of "XY") d.agents[id].token = ""; // the server holds the only copy now
-      location.hash = `#/lab/${out.id}`;
+      const id = await startRun("/api/lab/evaluations", labBody(d));
+      for (const a of "XY") d.agents[a].token = ""; // the server holds the only copy now
+      location.hash = `#/lab/${id}`;
     } catch (e) {
-      say(esc(e.message === "Failed to fetch" ? "The server could not be reached. Check that it is still running, then try again." : e.message));
-      start.disabled = false; start.innerHTML = `Run ${d.blocks * 4} negotiations${icon("chev-r")}`;
+      say(esc(e.message));
+      release(start, `Run ${d.blocks * 4} negotiations${icon("chev-r")}`, e.wait);
     }
   });
 }
@@ -1639,13 +1686,10 @@ function wireTry() {
     const body = { agents: { A: seatKind(d, "A"), B: seatKind(d, "B") }, first_mover: d.first, strategy: d.strategy, pool: Object.fromEntries(d.pool),
       preferences: Object.fromEntries(["A", "B"].map((r) => [r, Object.fromEntries(names.map((n, i) => [n, d.points[r][i]]))])) };
     try {
-      const res = await fetch("/api/sandbox/runs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-      const out = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(out.error ?? `The server refused the request (${res.status}).`);
-      location.hash = `#/live/${out.id}`;
+      location.hash = `#/live/${await startRun("/api/sandbox/runs", body)}`;
     } catch (e) {
-      say(e.message === "Failed to fetch" ? "The server could not be reached. Check that it is still running, then try again." : e.message);
-      start.disabled = false; start.innerHTML = `Start negotiation${icon("chev-r")}`;
+      say(e.message);
+      release(start, `Start negotiation${icon("chev-r")}`, e.wait);
     }
   });
 }
@@ -1684,8 +1728,17 @@ document.getElementById("theme").addEventListener("click", () => {
 // boot + live refresh (re-render only when the stored data changed)
 const live = document.getElementById("live");
 async function boot() {
-  try { await load(); await render(false); }
-  catch (e) { main.innerHTML = `${head("Cannot reach the lab server", `Start it with <code>PYTHONPATH=. python -m dashboard.server</code>, then reload this page. (${esc(e.message)})`)}`; live.classList.add("stale"); return; }
+  try {
+    st.sbx = await getJSON("/api/sandbox/info");
+    st.demo = st.sbx.public_demo === true;
+    if (st.demo) document.querySelector(".brand small").textContent = "Public demo · scripted agents";
+    await load(); await render(false);
+  } catch (e) {
+    const local = ["localhost", "127.0.0.1"].includes(location.hostname);
+    main.innerHTML = head("Cannot reach the lab server", local ? `Start it with <code>PYTHONPATH=. python -m dashboard.server</code>, then reload this page. (${esc(e.message)})`
+      : "The lab is not answering right now. It may be starting up: reload this page in a minute.");
+    live.classList.add("stale"); return;
+  }
   setInterval(async () => {
     try {
       const changed = await load();

@@ -15,11 +15,15 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
+import time
+import traceback
 from collections import Counter, defaultdict
 from dataclasses import asdict
 from pathlib import Path
 from typing import Optional
 
+from dashboard import demo
 from src.agents.prompting import BASELINE_VARIANT, STRUCTURED_V1_BLOCK, SYSTEM_INSTRUCTIONS
 from src.environment.allocation import compute_utility
 from src.evaluation import metrics as M
@@ -349,9 +353,34 @@ class Store:
             conn.close()
 
 
-def current_provenance() -> dict:
+def _provenance_now() -> dict:
     return {"protocol_id": provenance.PROTOCOL_ID, "spec_version": provenance.spec_version(),
             "prompt_hash": provenance.prompt_hash(), "code_version": provenance.code_version()}
+
+
+PROVENANCE_TTL_S = 60.0  # public demo: git runs at most once a minute, however many tabs poll
+_provenance_lock = threading.Lock()
+_provenance_cache: tuple = (0.0, None)  # (monotonic time computed, value)
+
+
+def current_provenance() -> dict:
+    """Local use: computed on every call, as before. Public demo: cached for PROVENANCE_TTL_S; one
+    caller refreshes while the others wait on the lock; a failed refresh keeps the last good value
+    (or 'unknown' fields), and its error goes to the server log only."""
+    if not demo.enabled():
+        return _provenance_now()
+    global _provenance_cache
+    with _provenance_lock:
+        stamp, value = _provenance_cache
+        if value is None or time.monotonic() - stamp >= PROVENANCE_TTL_S:
+            try:
+                value = _provenance_now()
+            except Exception:  # noqa: BLE001 — never shown to a visitor
+                traceback.print_exc()
+                value = value or {"protocol_id": provenance.PROTOCOL_ID, "spec_version": "unknown",
+                                  "prompt_hash": "unknown", "code_version": "unknown"}
+            _provenance_cache = (time.monotonic(), value)
+        return value
 
 
 def setup() -> dict:

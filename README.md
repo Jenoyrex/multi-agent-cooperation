@@ -120,6 +120,35 @@ and never starts or changes a run. Full-run results stay locked until all
 480 negotiations exist (spec §8.9). No inferential statistics are shown,
 because the §8.9 analysis has not been implemented yet.
 
+## Public demo mode
+
+```bash
+PUBLIC_DEMO=1 LAB_SCENARIO_SECRET=<64 hex characters> PYTHONPATH=. python -m dashboard.server --host 0.0.0.0
+```
+
+What a visitor can do: set up a negotiation between two **scripted,
+rule-based agents**, watch it live, and read the evaluator's analysis;
+or run the Agent Lab's balanced evaluation (up to 3 blocks, 12
+negotiations) on the same scripted agents. What it is not:
+
+- **Not an AI evaluation.** No AI provider is called and no API key is
+  used. Scripted agents follow fixed rules and ignore the instructions,
+  so their numbers show how the lab measures a negotiation, not how any
+  model negotiates. Claude, GPT and your own HTTP agents run only in the
+  full lab, on a local server with its own configuration.
+- **Not persistent.** Only the newest 100 runs of each kind are kept,
+  on the server's local disk; on a host whose disk is wiped on restart
+  (such as a free Render instance) they disappear with every restart.
+- **Not private between visitors.** Recent runs are listed for everyone.
+- **Not a benchmark.** Results are descriptive; no significance test is
+  run and no agent is ranked.
+
+The server enforces all of this itself, whatever the page sends: scripted
+agents only, no connection probe, at most 20 run starts per minute for
+the whole server, and no technical error detail in responses
+(`dashboard/demo.py`). The research views are unchanged and still show
+only real experiment data (none has been collected yet).
+
 ## Limitations (Phase 0/1)
 
 - Valuations are linear/separable, which makes the welfare-maximizing

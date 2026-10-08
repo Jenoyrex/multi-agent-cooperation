@@ -1,7 +1,7 @@
 // Run: node --test tests/
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { cellIndex, dotStack, esc, filterRows, fmt, labStages, outcomeShares, pct, phase, registerSlots, signed } from "../dashboard/static/lib.js";
+import { cellIndex, dotStack, esc, filterRows, fmt, labStages, outcomeShares, pct, phase, refusalMessage, registerSlots, retryAfterSeconds, signed } from "../dashboard/static/lib.js";
 
 const rows = [
   { key: "pilot:1", mode: "pilot", condition: "baseline_v1", family_A: "claude", family_B: "openai", model_A: "claude:x", model_B: "openai:y", first_mover: "A", outcome: "agreed", seed: 30000 },
@@ -87,4 +87,29 @@ test("labStages: empty lab is ready / locked / awaiting", () => {
   assert.deepEqual(labStages(snap(24, 10)), { pilot: "complete", full: "partial", analysis: "sealed", empty: false });
   assert.equal(labStages(snap(24, 480)).full, "complete");
   assert.equal(labStages(snap(24, 480)).analysis, "pending");
+});
+
+test("retryAfterSeconds: whole positive seconds only", () => {
+  assert.equal(retryAfterSeconds("23"), 23);
+  assert.equal(retryAfterSeconds(" 7 "), 7);
+  for (const bad of [null, undefined, "", "0", "-5", "1.5", "abc", "Wed, 21 Oct 2015 07:28:00 GMT", "999999"]) assert.equal(retryAfterSeconds(bad), null, bad);
+});
+
+test("refusalMessage: every refusal a start can get, in visitor words", () => {
+  const limited = "Too many runs were started on this demo in the last minute. Try again shortly.";
+  assert.equal(refusalMessage(429, { error: limited }, "23"), `${limited} You can start again in about 23 s.`);
+  assert.equal(refusalMessage(429, {}, null), "Too many runs were started recently.");
+  assert.equal(refusalMessage(409, { error: "Another evaluation is still running. Wait for it to finish." }), "Another evaluation is still running. Wait for it to finish.");
+  assert.equal(refusalMessage(400, { error: "The public demo runs scripted test agents only." }), "The public demo runs scripted test agents only.");
+  assert.equal(refusalMessage(403, {}), "The server refused the request (403).");
+  assert.equal(refusalMessage(400, { error: 42 }), "The server refused the request (400).");  // only text is shown
+});
+
+test("refusalMessage: a 5xx body is never shown, whatever it holds", () => {
+  for (const body of [{ error: "internal error" }, { error: "Traceback ... /home/app/dashboard/server.py" }, {}, null]) {
+    const m = refusalMessage(500, body);
+    assert.equal(m, "The server hit a problem and did not start the run. Please try again in a moment.");
+    assert.ok(!/internal|Traceback|\/home\//.test(m));
+  }
+  assert.equal(refusalMessage(503, { error: "busy" }), refusalMessage(500, {}));
 });

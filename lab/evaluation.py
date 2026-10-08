@@ -34,7 +34,7 @@ import uuid
 from typing import Optional
 
 from dashboard import data as D
-from dashboard import sandbox
+from dashboard import demo, sandbox
 from lab import adapters, metrics
 from src.agents.prompting import INSTRUCTION_VARIANTS
 from src.environment.optimum import compute_optimal_welfare
@@ -53,7 +53,9 @@ SECRET_MISSING = (f"Agent Lab needs a persistent scenario secret. Add {SECRET_EN
                   "characters, for example the output of: python -c \"import secrets; print(secrets.token_hex(32))\") "
                   "and restart the server. It keeps hidden scenarios secret from the agents and reproducible for you; "
                   "it is never shown, stored with results or sent to an agent. No evaluation was started.")
+DEMO_UNAVAILABLE = "Agent Lab is not available on this server right now. No evaluation was started."
 MAX_BLOCKS = 10
+DEMO_MAX_BLOCKS = 3  # public demo: at most 12 negotiations per evaluation
 CATEGORY_NAMES = DEFAULT_CATEGORY_NAMES + ["gizmos", "parts"]  # K <= 3 keeps the Phase-1 names
 MIN_CATS, MAX_CATS = 2, len(CATEGORY_NAMES)
 MAX_COST_USD = 2.0   # per evaluation, provider calls only
@@ -85,9 +87,13 @@ def _secret() -> bytes:
         key = bytes.fromhex(os.environ.get(SECRET_ENV, "").strip())
     except ValueError:
         key = b""
-    if len(key) < MIN_SECRET_BYTES:
-        raise adapters.SpecError(SECRET_MISSING)
+    if len(key) < MIN_SECRET_BYTES:  # the public demo does not tell visitors how the server is configured
+        raise adapters.SpecError(DEMO_UNAVAILABLE if demo.enabled() else SECRET_MISSING)
     return key
+
+
+def max_blocks() -> int:
+    return DEMO_MAX_BLOCKS if demo.enabled() else MAX_BLOCKS
 
 
 def ready() -> Optional[str]:
@@ -143,12 +149,17 @@ def validate(req) -> tuple[dict, dict]:
     if not isinstance(req, dict):
         raise adapters.SpecError("The request must be a JSON object.")
     agents = req.get("agents") or {}
+    if demo.enabled():  # before any spec is parsed or agent built: no provider, URL or token gets further
+        for aid in "XY":
+            spec = agents.get(aid) if isinstance(agents, dict) else None
+            if not isinstance(spec, dict) or spec.get("kind") != "scripted":
+                raise adapters.SpecError(demo.SCRIPTED_ONLY)
     specs, tokens = {}, {}
     for aid in "XY":
         specs[aid], tokens[aid] = adapters.validate_agent(agents.get(aid), f"Agent {aid}")
     sc = req.get("scenario") or {}
     n, k = sc.get("blocks"), sc.get("categories", 3)
-    for v, lo, hi, what in ((n, 1, MAX_BLOCKS, "The number of blocks"), (k, MIN_CATS, MAX_CATS, "The number of resource types")):
+    for v, lo, hi, what in ((n, 1, max_blocks(), "The number of blocks"), (k, MIN_CATS, MAX_CATS, "The number of resource types")):
         if not isinstance(v, int) or isinstance(v, bool) or not lo <= v <= hi:
             raise adapters.SpecError(f"{what} must be a whole number from {lo} to {hi}.")
     strategy = req.get("strategy")
@@ -254,9 +265,9 @@ def execute(ev: Evaluation, key: bytes, tokens: dict) -> None:
                 kind = cfg["agents"][aid]["kind"]
                 cls = ("budget_exhausted" if exc.reason == "budget_exhausted"
                        else "agent_failure" if kind == "http" else "provider_failure")
-                trial.update(status="aborted", abort={
+                trial.update(status="aborted", abort=demo.scrub({
                     "class": cls, "reason": exc.reason, "round": exc.round_number, "agent": aid, "seat": exc.actor,
-                    "attributed": cls == "agent_failure", **_explain(cls, exc, aid, adapters.describe(cfg["agents"][aid])["label"])})
+                    "attributed": cls == "agent_failure", **_explain(cls, exc, aid, adapters.describe(cfg["agents"][aid])["label"])}))
             trial["ended_at"] = time.time()
             with ev._lock:
                 ev.trials.append(trial)
@@ -295,7 +306,7 @@ def _explain(cls: str, exc: NegotiationAborted, aid: str, label: str) -> dict:
 
 def _finish(ev: Evaluation, status: str, error: Optional[dict] = None) -> None:
     with ev._lock:
-        ev.status, ev.error, ev.current = status, error, None
+        ev.status, ev.error, ev.current = status, error and demo.scrub(error), None
 
 
 # ---------------------------------------------------------------- summary
@@ -385,7 +396,10 @@ def start(req, background: bool = True) -> Evaluation:
     cfg, tokens = validate(req)
     with _guard:
         if _active is not None:
-            raise adapters.SpecError("Another evaluation is still running. Wait for it to finish.")
+            raise sandbox.BusyError("Another evaluation is still running. Wait for it to finish.")
+        if demo.enabled():  # nothing exists yet: a refused start leaves no trace
+            demo.take_start()
+            demo.prune_memory(_evals, demo.RETAIN - 1, None)
         ev = _active = Evaluation(cfg, key)
         _evals[ev.id] = ev
 
@@ -404,13 +418,18 @@ def start(req, background: bool = True) -> Evaluation:
 def save(ev: Evaluation) -> None:
     LAB_DIR.mkdir(parents=True, exist_ok=True)
     (LAB_DIR / f"{ev.id}.json").write_text(json.dumps(ev.view(), default=str), encoding="utf-8")
+    if demo.enabled():
+        demo.prune_disk(LAB_DIR, demo.RETAIN, ev.id)
 
 
 def _load(eid: str) -> Optional[dict]:
     if eid in _evals:
         return _evals[eid].view()
     if re.fullmatch(r"[0-9a-f]{12}", eid) and (path := LAB_DIR / f"{eid}.json").exists():
-        return json.loads(path.read_text(encoding="utf-8"))
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):  # removed by retention between the check and the read
+            return None
     return None
 
 
@@ -435,10 +454,13 @@ def get(eid: str) -> Optional[dict]:
 
 
 def listing() -> list[dict]:
-    """Evaluations, newest first: headers only, and results only while nothing runs."""
-    views = {e.id: e.view() for e in _evals.values()}
+    """Evaluations, newest first: headers only, and results only while nothing runs. Public demo:
+    the newest LISTING_MAX, built from at most that many in memory and that many files on disk."""
+    capped = demo.enabled()
+    evals = sorted(_evals.values(), key=lambda e: e.created, reverse=True)[:demo.LISTING_MAX] if capped else _evals.values()
+    views = {e.id: e.view() for e in evals}
     if LAB_DIR.exists():
-        for p in LAB_DIR.glob("*.json"):
+        for p in demo.newest_reports(LAB_DIR, demo.LISTING_MAX) if capped else LAB_DIR.glob("*.json"):
             if p.stem not in views:
                 try:
                     views[p.stem] = json.loads(p.read_text(encoding="utf-8"))
@@ -451,4 +473,5 @@ def listing() -> list[dict]:
         if not is_sealed and v.get("summary"):
             row.update(agreed=v["summary"]["outcomes"]["agreed"], complete_blocks=len(v["summary"]["blocks"]["complete"]))
         out.append(row)
-    return sorted(out, key=lambda v: v["created"], reverse=True)
+    out.sort(key=lambda v: v["created"], reverse=True)
+    return out[:demo.LISTING_MAX] if capped else out
