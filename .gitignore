@@ -15,3 +15,5 @@ experiments/pilots/
 sandbox_runs/
 # Local design-linter state (Impeccable): per-machine cache with absolute paths
 .impeccable/
+# Offline simulation database (recreated by scripts/run_offline_simulation.py)
+artifacts/offline_simulation/*.db
