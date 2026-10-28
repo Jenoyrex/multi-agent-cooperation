@@ -6,6 +6,11 @@ venv/
 *.egg-info/
 .env
 results/*.db
+results/*.db-journal
 results/*.csv
+results/*.jsonl
+experiments/pilots/
 .DS_Store
 sandbox_runs/
+# Local design-linter state (Impeccable): per-machine cache with absolute paths
+.impeccable/
