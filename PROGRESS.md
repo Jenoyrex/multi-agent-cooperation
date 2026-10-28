@@ -260,3 +260,99 @@ Commits (local, **not pushed**; `1de0b27` untouched): `16977be` (F5), `b1f2535` 
    Expect 24 pairs, `already charged ... $0.0000`, and no refusal.
 4. On authorisation only: the same command plus `--confirm`. After any stop: inspect, then (with approval) the same command plus
    `--resume --confirm`. Never a new `--db`.
+
+---
+
+## Zero-cost mandate (user request, 2026-10-28): the project must cost exactly $0
+
+The paid pilot is withdrawn as a milestone. No credentials were created or requested, no provider was called, and no paid execution happened or was authorised.
+`ALLOW_PAID_PROVIDER_CALLS` is never set; `.env` is absent; `ANTHROPIC_API_KEY` and `OPENAI_API_KEY` are not set.
+
+### Graph G1 — state check. PASS
+- `git status`: clean, `main...origin/main [ahead 7]`, HEAD `6415cd2`, `1de0b27` present and unamended; `results/` and `experiments/pilots/` empty.
+- Re-verified, not trusted from the summary: `PYTHONPATH=. py -m pytest -q -p no:cacheprovider` → **483 passed** (128 s);
+  `node --test tests/dashboard_lib.test.mjs` → **13 passed**.
+
+### Graph G2 — provider-call audit and zero-cost guard. Loops 1–3: PASS
+Every outbound path found (`git grep` for SDK constructors, `http.client`, `urllib`, `socket`, `requests`/`httpx`):
+
+| Path | Reaches | Gate |
+|---|---|---|
+| `ClaudeAgent._get_client` (pilot `--confirm`, real smoke test, dashboard sandbox models, Agent Lab `claude` kind) | Anthropic API | `require_paid_calls` before `import anthropic` |
+| `OpenAIAgent._get_client` (same callers) | OpenAI API | `require_paid_calls` before `import openai` |
+| `lab/adapters.HTTPAgent._post` (Agent Lab `http` agents and the probe endpoint) | any URL | `require_loopback` before any connection or DNS lookup (loopback agents stay allowed) |
+| `run_pilot()` without stub clients | both APIs | `require_paid_calls` before any file or lock exists |
+| `scripts/run_real_smoke_test.py main()` | both APIs | `require_paid_calls` before any agent exists |
+| `provenance.code_version` | local `git` subprocess | no network |
+
+- New `src/zero_cost.py`: `ZeroCostViolation` (a `RuntimeError`, never a `TransportError`, so it never triggers reruns);
+  the opt-in is the exact value `ALLOW_PAID_PROVIDER_CALLS=1`, which the $0 policy forbids; `network_tripwire()` blocks non-loopback
+  `connect`/`connect_ex`/`getaddrinfo` for the whole process and records each attempt.
+- `tests/conftest.py`: the opt-in is removed for every test, so zero-cost mode is always on in tests.
+- Loop 2 finding: `httpx` passes hostnames to `getaddrinfo` as **bytes**. The tripwire now decodes them (it had blocked them anyway, and would also have blocked bytes loopback names).
+- Loop 3 finding: the full suite showed 2 failures, both in `test_lab.py::test_idna_invalid_hostname_is_an_agent_failure`. Zero-cost mode refuses
+  remote HTTP agents before the IDNA check those tests exercise. Resolution, with no assertion weakened: that test now runs with the opt-in, inside the
+  tripwire and asserting no network attempt, so it still checks IDNA errors become agent failures. A new test checks default mode refuses the
+  same URLs before any network call. Running it inside the tripwire showed the tripwire intercepted `getaddrinfo` before the real IDNA encoding. It now
+  encodes first, like the real resolver (verified: real `getaddrinfo` raises `UnicodeError` locally for those names), with a test for it.
+- Tests: `tests/test_zero_cost.py` (13), plus 3 new parametrized cases in `test_lab.py`. Mutation check: removing each of the 5 gates in turn fails 1–2 tests each; files restored.
+
+### Graph G3 — offline simulation pilot (SIMULATED DATA). PASS
+- `src/experiments/simulation.py` + `scripts/run_offline_simulation.py`: the frozen pilot matrix (8 cells × seeds 30000–30002 = 24, the same condition
+  labels, seat and first-mover swaps) with two deterministic `MockAgent`s named `SIMULATED-mock-X/Y`, `runs.mode='simulation'`, inside the network tripwire.
+  The script refuses to run if the opt-in is set and never deletes a database that is not purely simulated.
+- Labels: every CSV row has `data_label=SIMULATED`; `summary.json` carries `data_label`; `REPORT.md` opens with the disclaimer and states that no empirical
+  LLM experiment was run and the research question is unanswered. The analysis (`load_rows`) refuses any DB with a non-simulation run or a non-mock agent.
+  Output lives in `artifacts/offline_simulation/`, outside `results/`, so the research dashboard (which reads `results/*.db`) never sees it.
+- Command: `PYTHONPATH=. py scripts/run_offline_simulation.py` → exit 0; 24 negotiations; integrity problems 0; network attempts blocked 0; API keys present: False.
+- Reproducible: a second run gave byte-identical files (sha256): `negotiations.csv` f6e57efd343d86b1f3d3aea3c6e3e309ed57c6dfa65106f9c8bc0d56422216c4,
+  `summary.json` df674ec82c8d9a5bda2a3d4fc3843b64c35353172501c9f9048cbbaf89a4cada, `REPORT.md` 11518e2c81ed3c43f743f56e8d6ecaeffafa9e6678490eb7dfcfa31278c7f8a2 (after the review rewording below).
+- Simulated outcome (mock agents only): 24/24 agreed; mean RWE 0.689, mean EW 0.443 in **both** condition labels. Every paired structured − baseline
+  difference is exactly 0, as expected by construction (mocks ignore instructions); a test shows that check is not vacuous.
+
+### Graph G4 — local pipeline validation. PASS
+Covered end to end without network: negotiation and outcome classification (`test_protocol.py`), metrics (`test_metrics.py`), persistence and CHECK
+constraints (`test_storage.py`, `test_schema_constraints.py`), budget ledger, recovery and resume (`test_pilot_resume.py`, stub clients only), zero-cost
+guard (`test_zero_cost.py`), simulation, independent record re-checks (instance regenerated from its seed, optimum and utilities recomputed), analysis
+and report generation (`test_offline_simulation.py`, 13 tests, including tamper detection, label checks and committed-artifact equality).
+
+### Graph G5 — local inference assessment (read-only, nothing downloaded). Not pursued
+- Hardware: Intel i7-10750H (6 cores), 15.8 GB RAM, NVIDIA RTX 2060 with **4 GB VRAM**, 74 GB free disk.
+- Software: no Ollama, llama.cpp, LM Studio, PyTorch, Transformers, vLLM or GPT4All; `onnxruntime` is installed but no model weights exist on disk.
+- Feasibility: a small quantized model (about 1–4B parameters) would fit, but it needs a runtime and roughly 1–5 GB of weights to be downloaded (not done;
+  would need your approval), plus local compute time and power.
+- Scientific caveat: the preregistered design fixes Claude Sonnet 4.6 and GPT-4.1 (§8.15). A local model run would be an exploratory deviation, not the
+  preregistered experiment, and could not answer the research question as stated. **Default remains the offline mock simulation.**
+
+### Independent review (read-only subagent): APPROVE, nothing blocking
+It confirmed: SDK clients are built only in the two gated `_get_client` methods, and every caller (sandbox, Lab kinds, probe, pilot, smoke test) goes through them;
+`HTTPAgent._post` is gated before any connection; `ZeroCostViolation` is never converted into a `TransportError` (no reruns) and ends Lab/sandbox runs
+as stopped; the tripwire is sound for this codebase; the `test_lab.py` change is a legitimate adaptation; the labels are unambiguous and invisible to
+the research dashboard; no frozen file changed; 151 targeted tests pass; it reproduced the artifacts byte-for-byte.
+Non-blocking notes and how they were handled:
+- (a) REPORT.md asserted "no API key was present" as a fixed sentence. Reworded to what the guard guarantees; artifacts regenerated (REPORT.md hash above).
+- (b) `"simulation"` is not in the `Mode` type hint in `config.py`. **Left unchanged on purpose**: `config.py` is the frozen runtime file, the
+  Literal is not enforced at runtime, and a type checker would flag the call in `simulation.py`.
+- (c) A zero-cost refusal in Lab or sandbox shows as "Unexpected error". It still fails closed; a clearer message is listed under limitations.
+- (d) Out of scope, reported to the user: a separate git worktree `.kilo/worktrees/reflective-snail` (detached at `46d1758`, excluded via
+  `.git/info/exclude`) holds older, **ungated** code. Do not run anything from it. A loopback HTTP agent could itself call paid APIs; the guard cannot see past it.
+
+### Final verification
+| Command | Result |
+|---|---|
+| `PYTHONPATH=. py -m pytest -q -p no:cacheprovider` | exit 0, **512 passed** (128 s) |
+| `node --test tests/dashboard_lib.test.mjs` | exit 0, **13 passed** |
+| `PYTHONPATH=. py scripts/run_smoke_test.py` | exit 0; mock-only DB (5 negotiations, 0 API calls) checked and removed |
+| `PYTHONPATH=. py scripts/run_offline_simulation.py` (twice) | exit 0; identical hashes; 0 integrity problems; 0 network attempts |
+
+### What has and has not been demonstrated
+- **Software validation:** demonstrated. The pipeline runs, classifies, stores, re-checks, analyses and reports correctly offline, and fails closed on any paid or remote call.
+- **Simulation results:** demonstrated only as a plumbing check; mock-agent numbers carry no information about LLM negotiation.
+- **Empirical LLM results:** **none.** No real-model pilot or experiment was run. H1–H3 are untested and the research question remains empirically unanswered.
+
+### Remaining limitations
+- The preregistered §8.9 inferential analysis (sign-flip permutation, bootstrap CI, Holm) is not implemented; the simulation analysis is descriptive only.
+- The simulation personas produce only `agreed` outcomes; the other outcome paths are covered by unit tests, not by this run.
+- Answering the research question needs real Claude and GPT calls, which cost money and are out of scope under the $0 policy.
+- The paid code paths still exist, are tested only with stub clients, and are locked behind the opt-in.
+- In the Lab and sandbox, a zero-cost refusal is reported as a generic "Unexpected error" rather than a dedicated message.
