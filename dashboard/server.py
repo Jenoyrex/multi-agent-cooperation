@@ -58,6 +58,8 @@ from urllib.parse import parse_qs, urlparse
 from dashboard import demo, sandbox
 from dashboard.data import RESULTS_DIR, Store
 from lab import adapters, evaluation
+from workbench import api as workbench_api
+from workbench.agents import WorkbenchError
 
 STATIC = Path(__file__).resolve().parent / "static"
 DEFAULT_HOST, DEFAULT_PORT = "127.0.0.1", 8765
@@ -172,6 +174,8 @@ class Handler(SimpleHTTPRequestHandler):
         if url.path.startswith("/api/lab/evaluations/"):
             ev = evaluation.get(url.path.rsplit("/", 1)[1])
             return self._json(ev) if ev else self._json({"error": "not found"}, 404)
+        if url.path.startswith("/api/workbench/"):
+            return self._json(*workbench_api.get(url.path))
         if url.path.startswith("/api/"):
             return self._json({"error": "not found"}, 404)
         return super().do_GET()
@@ -202,7 +206,7 @@ class Handler(SimpleHTTPRequestHandler):
         raw = self.headers.get("Content-Length", "")  # absent or not a number: no body to read
         length = (int(raw) if len(raw) <= 9 else MAX_BODY_BYTES + 1) if raw.isascii() and raw.isdigit() else 0
         path = urlparse(self.path).path
-        route = None if demo.enabled() and path in DEMO_ABSENT_ROUTES else POST_ROUTES.get(path)
+        route = None if demo.enabled() and path in DEMO_ABSENT_ROUTES else POST_ROUTES.get(path) or workbench_api.post_route(path)
         if route is None:  # an absent route does nothing with the body but discard it
             return self._refuse(length, {"error": "method not allowed"}, 405)
         # Starting a run costs money: only this page may do it. A cross-site form or
@@ -225,6 +229,8 @@ class Handler(SimpleHTTPRequestHandler):
             return self._json({"error": "The request was not valid JSON."}, 400)
         except demo.RateLimited as exc:  # public demo only; raised before a run or evaluation exists
             return self._json({"error": str(exc)}, 429, [("Retry-After", str(exc.retry_after))])
+        except WorkbenchError as exc:  # names the field to correct
+            return self._json(exc.payload(), exc.status)
         except (sandbox.SandboxError, adapters.SpecError) as exc:
             busy = demo.enabled() and isinstance(exc, sandbox.BusyError)  # local answers keep their 400
             return self._json({"error": str(exc)}, 409 if busy else 400)

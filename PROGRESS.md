@@ -356,3 +356,11 @@ Non-blocking notes and how they were handled:
 - Answering the research question needs real Claude and GPT calls, which cost money and are out of scope under the $0 policy.
 - The paid code paths still exist, are tested only with stub clients, and are locked behind the opt-in.
 - In the Lab and sandbox, a zero-cost refusal is reported as a generic "Unexpected error" rather than a dedicated message.
+
+---
+
+## Workbench platform (2026-10-28): PARTIAL, backend only
+- G1 audit done: stdlib server plus vanilla-JS SPA with vendored Motion, no build step (no npm, so shadcn/React do not apply). Impeccable skill context loaded (no PRODUCT.md/DESIGN.md; the incumbent design system is the authority).
+- Implemented `workbench/` (agents adapter registry with locked Claude/GPT/Gemini, PriorityAgent, environments with JSON/text import and field-level errors, SQLite store in sandbox_runs/, simulation runner on the unchanged NegotiationSession, analytics with evidence, exports), plus API routes in dashboard/server.py behind the existing guards.
+- Tests: `tests/test_workbench.py` 9 passed; full suite **521 passed**; JS **13 passed**; no network attempts (tripwire).
+- **Not done:** the Workbench UI pages (agents, environments, simulation builder, live workspace, analytics, export), the design critique, the docs (docs/workbench.md), and an independent review.
