@@ -364,3 +364,22 @@ Non-blocking notes and how they were handled:
 - Implemented `workbench/` (agents adapter registry with locked Claude/GPT/Gemini, PriorityAgent, environments with JSON/text import and field-level errors, SQLite store in sandbox_runs/, simulation runner on the unchanged NegotiationSession, analytics with evidence, exports), plus API routes in dashboard/server.py behind the existing guards.
 - Tests: `tests/test_workbench.py` 9 passed; full suite **521 passed**; JS **13 passed**; no network attempts (tripwire).
 - **Not done:** the Workbench UI pages (agents, environments, simulation builder, live workspace, analytics, export), the design critique, the docs (docs/workbench.md), and an independent review.
+
+### Workbench UI and completion (2026-10-28, continued)
+- **G3–G7 UI** in `dashboard/static/workbench.js` (one module plugged into `app.js`, which passes in its own helpers, router and Motion), with a `Workbench` navigation group and a token-based CSS section:
+  overview with honest capability table; agent library (create, edit, duplicate, two-step delete; locked providers read-only);
+  environment builder (visual editor, text/JSON import or file open, live server-side validation with field highlighting, preview with optimum);
+  simulation builder (design size and warnings before running); live workspace (engine turns, seats, inventory, progress, cancel);
+  negotiations table with transcripts; analytics (by condition, outcome figure, agent comparison, utility dot plot, resource priorities, evidence-linked observations); log; exports (server-built, labelled).
+- **Browser verification** (Chrome on 127.0.0.1): overview, builder, a 24-negotiation run followed live, analytics, environment import→preview→load→save,
+  agent validate→save→delete, light theme; no console errors. Fixed in loops: oversized figure, stale tab count, missing "still running" notice,
+  focus stolen by live validation, ambiguous observation wording, the seat-mixed points label, and evidence truncation shown as a total.
+  **Not verified:** phone width visually (window resize did not apply; the server's anti-framing headers correctly refuse an iframe probe).
+- **Impeccable** (v4.3.1, cached engine; no download): context loaded, craft floor read, detector run once. Its only finding on new code was a layout-animated progress bar, now transform-based.
+  The 4 remaining warnings are pre-existing (lines 762–848, previously acknowledged).
+- **Independent review:** REQUEST CHANGES, one blocking item. Local HTTP agents were flagged as not reading instructions, but they receive the condition's instructions,
+  which made 4 statements wrong. Fixed (`reads_instructions=True`; cost label now based on agent category). Non-blocking items also fixed: concession n, "largest/smallest share"
+  wording, cancel after the last negotiation, the 12 KB import limit matching the server, CSV formula neutralising, a non-string id now gives 400 not 500, README label wording. The fixes are covered by
+  regression tests; the reviewer was not re-run.
+- **Verification:** `pytest` **526 passed**; `node --test` **13 passed**; offline simulation hashes unchanged; frozen files unchanged since `1de0b27`; no provider call, no network beyond 127.0.0.1.
+- **Remaining:** responses to scarcity not analysed; no inferential tests; bilateral protocol only; phone layout not visually verified; Impeccable update (v4.8.0) not applied.

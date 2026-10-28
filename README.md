@@ -120,6 +120,14 @@ and never starts or changes a run. Full-run results stay locked until all
 480 negotiations exist (spec §8.9). No inferential statistics are shown,
 because the §8.9 analysis has not been implemented yet.
 
+## Workbench (exploratory, zero cost)
+
+The dashboard's **Workbench** lets you build agents and environments (visual editor, JSON or text import),
+run designed simulations on the unchanged engine, follow them live, and read behavioural analytics and
+exports. Rule-based and Python agents run locally at no cost; Claude, GPT and Gemini entries are configurable
+but locked. Rule-based runs are labelled simulated, runs with your local HTTP agents are labelled local agents, and both are stored in `sandbox_runs/`, never `results/`.
+See [docs/workbench.md](docs/workbench.md).
+
 ## Public demo mode
 
 ```bash

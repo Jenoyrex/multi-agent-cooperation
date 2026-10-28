@@ -69,7 +69,7 @@ def test_simulation_runs_persists_analyses_and_exports():
             assert t["rwe"] == 0 and t["ew"] == 0
     for name in ("config.json", "negotiations.csv", "summary.csv", "report.md", "transcripts.json"):
         content = api.get(f"/api/workbench/simulations/{sim.id}/export/{name}")[0]["content"]
-        assert "SIMULATED" in content or name == "transcripts.json" and "SIMULATED" in content
+        assert "SIMULATED" in content, name
 
 
 def test_builtins_are_read_only_and_deletes_work():
@@ -78,3 +78,56 @@ def test_builtins_are_read_only_and_deletes_work():
     doc, _ = api.post_route("/api/workbench/agents")({"name": "Mine", "kind": "concession"})
     assert api.post_route(f"/api/workbench/agents/{doc['id']}/delete")({})[1] == 200
     assert api.get(f"/api/workbench/agents/{doc['id']}")[1] == 404
+
+
+# ------------------------------------------------------------ through the real server guards
+def test_workbench_routes_sit_behind_the_server_guards():
+    import json
+    from tests.test_server import _request, _serve
+    srv = _serve()
+    port = srv.server_address[1]
+    host = [("Host", f"127.0.0.1:{port}")]
+    body = json.dumps({"format": "text", "content": TEXT}).encode()
+    try:
+        status, _, raw = _request(port, "GET", "/api/workbench/catalog", host)
+        assert status == 200 and json.loads(raw)["zero_cost"] is True
+        assert _request(port, "GET", "/api/workbench/catalog", [("Host", "evil.example")])[0] == 403
+        ok = _request(port, "POST", "/api/workbench/environments/preview", host + [("Content-Type", "application/json")], body)
+        assert ok[0] == 200 and json.loads(ok[2])["instance"]["optimal_welfare"] == 150
+        cross = _request(port, "POST", "/api/workbench/agents", host + [("Origin", "http://evil.example"),
+                                                                        ("Content-Type", "application/json")], b'{"name":"x","kind":"concession"}')
+        assert cross[0] == 403 and store.all_("agents") == []
+        bad = _request(port, "POST", "/api/workbench/agents", host + [("Content-Type", "application/json")], b'{"name":"","kind":"concession"}')
+        assert bad[0] == 400 and json.loads(bad[2])["field"] == "name"
+        locked = _request(port, "POST", "/api/workbench/simulations", host + [("Content-Type", "application/json")],
+                          json.dumps({"environment": "builtin-research", "agents": {"X": "builtin-gpt", "Y": "builtin-priority"},
+                                      "conditions": ["baseline_v1"]}).encode())
+        assert locked[0] == 400 and json.loads(locked[2])["field"] == "agents.X"
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
+def test_the_workbench_is_read_only_in_the_public_demo(monkeypatch):
+    from dashboard import demo
+    monkeypatch.setenv(demo.ENV, "1")
+    with pytest.raises(WorkbenchError) as exc:
+        api.post_route("/api/workbench/agents")({"name": "x", "kind": "concession"})
+    assert exc.value.status == 403 and store.all_("agents") == []
+
+
+def test_http_agents_are_known_to_read_instructions():
+    """They receive the condition's instructions in every request, so no statement may claim otherwise."""
+    assert A.KINDS["http_local"].reads_instructions
+    assert not A.KINDS["concession"].reads_instructions and not A.KINDS["priority"].reads_instructions
+
+
+def test_csv_exports_neutralise_formula_prefixes():
+    from workbench.export import _csv
+    assert _csv(["name"], [["=cmd()"], ["plain"]]) == "name\n'=cmd()\nplain\n"
+
+
+def test_a_non_string_id_is_a_clean_400():
+    with pytest.raises(WorkbenchError) as exc:
+        api.post_route("/api/workbench/agents")({"id": ["x"], "name": "x", "kind": "concession"})
+    assert exc.value.field == "id" and exc.value.status == 400

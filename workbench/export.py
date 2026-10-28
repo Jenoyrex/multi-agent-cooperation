@@ -25,7 +25,8 @@ def _csv(header, rows) -> str:
     buf = io.StringIO()
     w = csv.writer(buf, lineterminator="\n")
     w.writerow(header)
-    w.writerows([["" if v is None else v for v in r] for r in rows])
+    # A leading = + - @ would make a spreadsheet evaluate a name as a formula.
+    w.writerows([["" if v is None else f"'{v}" if isinstance(v, str) and v[:1] in "=+-@" else v for v in r] for r in rows])
     return buf.getvalue()
 
 

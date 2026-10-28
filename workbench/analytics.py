@@ -73,6 +73,7 @@ def agent_profile(label: str, trials: list[dict]) -> dict:
         "utilities": utilities,
         "opening_demand_mean": _m(x["opening_demand"] for x in b), "total_concession_mean": _m(x["total_concession"] for x in b),
         "concession_frequency_mean": _m(x["concession_frequency"] for x in b), "offers_mean": _m(x["offers"] for x in b),
+        "n_concession": sum(x["total_concession"] is not None for x in b),
         "accepted": accepts, "walked_away": walks, "invalid": invalid,
         "priority_alignment": _m(alignment), "n_alignment": sum(x is not None for x in alignment),
         "resources": by_res,
@@ -89,9 +90,9 @@ def observations(profiles: dict, by_condition: dict, names: dict, reads_instruct
             top = max(claimed, key=lambda c: (claimed[c]["opening_claim_mean"], c))
             low = min(claimed, key=lambda c: (claimed[c]["opening_claim_mean"], c))
             r = claimed[top]
-            text = f"{who} claimed {r['opening_claim_mean']:.0%} of {top} on average in its opening offers"
+            text = f"In its opening offers, {who} claimed its largest share of {top} ({r['opening_claim_mean']:.0%} on average)"
             if low != top:
-                text += f", and {claimed[low]['opening_claim_mean']:.0%} of {low}"
+                text += f" and its smallest share of {low} ({claimed[low]['opening_claim_mean']:.0%})"
             out.append({"agent": label, "basis": "observed", "text": text + ".",
                         "evidence": r["opening_evidence"][:12], "n": r["n_opening"]})
         if p["priority_alignment"] is not None:
@@ -103,7 +104,7 @@ def observations(profiles: dict, by_condition: dict, names: dict, reads_instruct
             out.append({"agent": label, "basis": "observed",
                         "text": f"Between its first and last offer, {who} lowered what it asked for by {p['total_concession_mean']:.2f} "
                                 f"of its own maximum on average (negotiations where it made at least two offers).",
-                        "evidence": [], "n": p["negotiations"]})
+                        "evidence": [], "n": p["n_concession"]})
         if p["accepted"] or p["walked_away"] or p["invalid"]:
             parts = [f"accepted the final offer in {len(p['accepted'])}"] + \
                     ([f"walked away in {len(p['walked_away'])}"] if p["walked_away"] else []) + \

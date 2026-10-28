@@ -100,6 +100,8 @@ def _save(table: str, builtin: dict, validator: Callable):
             raise WorkbenchError("Expected a JSON object.")
         clean = validator(req)
         id_ = req.get("id")
+        if id_ is not None and not isinstance(id_, str):
+            raise WorkbenchError("The id must be a string.", "id")
         if id_ in builtin:
             raise WorkbenchError("Built-in entries are read-only. Duplicate it to make your own version.", "id")
         old = store.get(table, id_) if isinstance(id_, str) else None

@@ -1,6 +1,7 @@
 import { CONDITIONS, esc, filterRows, fmt, labStages, mean, modelLabel, OUTCOME_LABEL, OUTCOMES, outcomeShares, pct, phase, refusalMessage, registerSlots, retryAfterSeconds, short, signed, timeAgo, uniq } from "./lib.js";
 import { dataTable, dotPlot, figure, histogram, legend, stackBars } from "./charts.js";
 import { createField } from "./field.js";
+import { createWorkbench } from "./workbench.js";
 
 // Motion's vanilla build (vendor/motion.js, loaded as a classic script) exposes window.Motion.
 // Everything below degrades to the static page if it is missing or motion is reduced.
@@ -123,6 +124,11 @@ function statusLine(s) {
 }
 /** The step that follows this page on the first-visit route. */
 const next = (href, label, why) => `<nav class="next" aria-label="Next step"><a href="${href}">Next: ${esc(label)}${icon("chev-r")}</a><span>${why}</span></nav>`;
+// Workbench pages (dashboard/static/workbench.js) share this file's helpers, router and motion.
+const wb = createWorkbench({ main, h: { icon, head, blockHead, notice, readout }, render: (animate) => render(animate),
+  onCleanup: (fn) => cleanups.push(fn), motion: { M, on: motionOn, EASE } });
+Object.assign(routes, wb.routes);
+Object.assign(NAV_OF, wb.nav);
 const pilotNotice = notice("info", "info", "<b>Operational pilot (spec §8.4).</b> Three instances across the eight design cells. Pilot negotiations are excluded from the confirmatory dataset, so treat these values as checks on the harness, not findings.");
 
 function register(rows, seeds, kind) {
@@ -1606,6 +1612,7 @@ function playTimeline() {
 
 // ------------------------------------------------------------------ wiring
 function wire(name) {
+  wb.wire(name, parse().arg);
   const media = main.querySelector(".hero-media");
   if (media) cleanups.push(heroVideo(media));
   main.querySelectorAll("[data-dataset]").forEach((b) => b.addEventListener("click", () => { st.dataset = b.dataset.dataset; render(); }));
@@ -1744,7 +1751,7 @@ async function boot() {
       const changed = await load();
       live.classList.remove("stale", "tick"); void live.offsetWidth; live.classList.add("tick");
       const { name } = parse();
-      if (changed && !["negotiation", "try", "live", "result", "compare"].includes(name)) { const y = scrollY; await render(false); scrollTo(0, y); }
+      if (changed && !["negotiation", "try", "live", "result", "compare", ...wb.names].includes(name)) { const y = scrollY; await render(false); scrollTo(0, y); }
     } catch { live.classList.add("stale"); }
   }, 10000);
 }

@@ -228,7 +228,7 @@ def execute(sim: Simulation) -> None:
                 sim.trials.append(trial)
             store.put("simulations", sim.doc())
         with sim._lock:
-            sim.status = "cancelled" if sim.cancel_requested else "completed"
+            sim.status = "cancelled" if sim.cancel_requested and len(sim.trials) < len(sim.plan) else "completed"
     except Exception as exc:  # noqa: BLE001 — recorded on the simulation; traceback to the server log
         traceback.print_exc()
         with sim._lock:

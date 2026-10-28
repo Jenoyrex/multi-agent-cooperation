@@ -172,7 +172,7 @@ KINDS = {k.id: k for k in (
          "Its behaviour is whatever that program does; the workbench does not verify it.",
          (Param("url", "Endpoint URL", "text", "http://127.0.0.1:8001/turn", "A loopback http:// URL. No token is stored."),
           Param("timeout_s", "Timeout per turn (s)", "number", 10, "Seconds to wait for each answer.", 1, 60)),
-         True, deterministic=False, build=_http_build, check=_http_check),
+         True, reads_instructions=True, deterministic=False, build=_http_build, check=_http_check),  # each request carries the condition's instructions
     Kind("claude", "Claude (Anthropic)", "provider", "Provider adapter: src.agents.claude_agent.ClaudeAgent with the approved runtime.",
          (_model("ClaudeAgent"),), False, LOCKED, reads_instructions=True, deterministic=False, cost="paid"),
     Kind("openai", "GPT (OpenAI)", "provider", "Provider adapter: src.agents.openai_agent.OpenAIAgent with the approved runtime.",
