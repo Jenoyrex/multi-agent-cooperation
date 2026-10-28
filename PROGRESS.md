@@ -166,3 +166,97 @@ Exact steps once authorised:
 4. `PYTHONPATH=. py scripts/run_pilot.py --max-input-tokens-per-call 20000 --max-cost-usd 20 --confirm`
 
 ## Stage 5 — NOT STARTED (no authorisation, no credentials)
+
+---
+
+## Remediation of F1 / F2 / F5 (user request, 2026-10-28)
+
+Graph order: F5 (storage), then F1 (pilot driver), with F2 investigated alongside F1. Then an independent review, then commits.
+No real API call was made. No frozen research decision was changed: outcomes, invalid reasons, protocol engine, prompts,
+metrics, seeds, cells, approved runtime, `max_transport_reruns=2` and the `Budget` accounting rules in `usage.py` are untouched.
+
+### Graph F5 — storage constraints. Loop 1: PASS
+- Change: `src/storage/db.py` adds CHECK constraints: `outcome` ∈ the 4 frozen outcomes; `invalid_reason` ∈ the 3 frozen
+  reasons; a reason present iff `invalid_action`; an allocation present iff `agreed`; utilities 0 on failures;
+  `first_mover` ∈ {A, B}; `runs.status` and the abort `reason` are enumerated. `SCHEMA_VERSION` 2 → 3; no database with data exists.
+- Tests: `tests/test_schema_constraints.py` (15). Mutation check: with the constraints reverted, 9 tests fail.
+- Full suite: **473 passed**. Commit **`16977be`**.
+
+### Graph F1 — persistent shared budget, resume, single invocation. Loop 1 (fix: validate before taking the lock), loop 2: PASS
+Design (src/experiments/pilot.py, src/storage/db.py, scripts/run_pilot.py):
+- **The budget lives in the pilot DB.** `budget_caps` holds the caps fixed at creation. `budget_ledger` holds every
+  `Budget.add` call, written immediately (`PersistentBudget`). A resume replays the ledger through the unchanged `Budget.add`,
+  so spend and any stop reason return exactly as they were.
+- **Crash safety.** Each run left `running` or `failed` is charged one worst-case call (4 × (20,000 + 1,024) tokens at the priciest model),
+  which covers a call in flight or not yet written to the ledger when the process died.
+- **No reset.** `--resume` must use the same caps (otherwise refused). A fresh start is refused if the DB exists or if another pilot DB
+  exists in the same directory. Only one invocation at a time: exclusive SQLite lock on `<db>.lock`, released by the OS if the process dies.
+- **No duplicates.** A resume runs only (cell, seed) pairs without a record, as contiguous batches per cell; a fresh DB still
+  gives exactly the 8 preregistered batches of 3. A resume refuses DBs containing duplicate pairs, non-pilot runs, or runs whose
+  protocol id, spec hash, prompt hash, generation settings or prices differ from the current ones.
+- **Transport policy kept.** A pair with transport-failure aborts and no record is `blocked`. It is never re-run
+  automatically, so it never gets more than the approved 2 reruns. It needs an explicit decision.
+- **Dry run unchanged in kind.** `prepare_pilot` only reads (read-only SQLite URI). The CLI dry run with `--resume` prints the
+  remaining plan and the spend already charged.
+- Tests: `tests/test_pilot_resume.py` (9): restart cannot reset or raise the cap; crash then resume (lost call charged, only missing
+  pairs run, 24 unique pairs, resume dry run writes nothing); in-turn retries charged once, persisted and replayed; exhausted
+  transport reruns block the pair and the resume skips it; concurrent invocation refused; duplicate/foreign/provenance-changed
+  records refuse a resume; an input-ceiling breach stops the pilot and survives a restart. All 37 existing `test_pilot.py` tests pass unchanged.
+- Mutation check (each safeguard disabled in turn): no ledger replay → 4 fail; no crash charge → 1 fail; no duplicate check → 1 fail;
+  no blocking → 1 fail; no lock → 1 fail. File restored afterwards.
+- `.gitignore`: `results/*.lock`.
+
+### Graph F2 — input-token ceiling timing. Investigated: no engine change justified
+- Finding confirmed: the 20,000 ceiling is checked after each call, from the provider-reported usage (`usage.py:323-326`).
+- A pre-call check needs a token count. There is no local tokenizer (`tiktoken` not installed), Anthropic counting is a network
+  call, and a character-based bound would refuse legitimate prompts (10 turns × 1,024 tokens of messages is far more than 20,000 characters).
+- Structural bound: system prompt ≈ 2.4k characters; transcript ≤ 9 prior turns × ≤ 1,024 output tokens, so about 10–12k input tokens.
+  That is under 20,000 unless the other provider's tokenizer expands the text by more than about 1.6×.
+- Guarantee kept and now tested across restarts: a breach stops all further calls, and the stop is replayed on resume
+  (`test_an_input_ceiling_breach_stops_the_pilot_and_survives_a_restart`). Residual risk: one call can exceed its reserve; that excess is
+  charged at the actual reported usage.
+
+### Verification (F1/F2)
+| Command | Result |
+|---|---|
+| `PYTHONPATH=. py -m pytest -q -p no:cacheprovider` | exit 0, **482 passed** (119 s) |
+| Guarded CLI dry run (no `--confirm`, network blocked, no keys) | exit 0; same 24-pair plan; `already charged: 0 tokens, $0.0000`; worst case $59.30496; nothing written to `results/` |
+| Guarded CLI dry run with `--resume`, no pilot DB | refused: `... is not an existing pilot database; there is no pilot to resume.` |
+
+### Independent review (read-only subagent): APPROVE, nothing blocking
+It verified: no frozen file changed; a fresh DB gives the same 8 configs (base 30000, n=3) in cell order as HEAD; no spend
+under-count path (at most one call in flight, covered by the crash charge, which is never persisted so never double-counted); no
+duplicate or over-rerun path; the dry run writes nothing (read-only URI, no lock or mkdir without `--confirm`); the tests pin exact totals.
+Four non-blocking suggestions, handled in loop 3:
+1. The "blocked" message overstated the cause (a crash during a rerun also blocks a pair). Message corrected: "a transport
+   failure is recorded and no outcome; never re-run automatically, needs an explicit decision".
+2. The fresh-budget guard only sees `*.db` in the same directory. **Kept as a documented procedural risk:** a pilot started
+   under another name or directory gets a fresh $20 cap. Use only the default `results/pilot.db`.
+3. Ledger not cross-checked on replay. Now each ledger row stores its own charge and the replay must reproduce it
+   (a running total would include the unpersisted crash charge and misfire). A tampered row refuses the resume (new test case).
+4. `run_pilot` built extra agents just to size the budget. It now reuses the budget from `prepare_pilot`.
+
+### Final verification (loop 3) and commits
+| Command | Result |
+|---|---|
+| `PYTHONPATH=. py -m pytest -q -p no:cacheprovider` | exit 0, **483 passed** (129 s) |
+| `node --test tests/dashboard_lib.test.mjs` | exit 0, **13 passed** |
+| `PYTHONPATH=. py scripts/run_smoke_test.py` | exit 0; mock-only DB (5 negotiations, `mock-greedy-A/B`, 0 API calls) checked and removed |
+| Guarded CLI dry run (fresh) | exit 0; 24 pairs; $0 charged; worst case $59.30496; `results/` empty afterwards |
+
+Commits (local, **not pushed**; `1de0b27` untouched): `16977be` (F5), `b1f2535` (F1 + F2 test), and this log update.
+
+### Updated findings status
+- F1: **resolved in code** (`b1f2535`). Residual procedural risk: a pilot under a different DB name or directory.
+- F2: **investigated**; post-call detection kept and tested across restarts; residual risk of one oversized call is accepted.
+- F3/F4: unchanged (informational). F4's lost-call accounting is now covered by the crash charge.
+- F5: **resolved** (`16977be`).
+- F6: **open, blocks Stage 5**: `.env` absent.
+
+### Updated Stage 4 steps (zero-cost, before authorising)
+1. User creates `.env` from `.env.example` (both keys; values identical to the approved ones).
+2. `git status` clean; `results/` contains no `pilot.db`.
+3. Dry run with the real `.env`: `PYTHONPATH=. py scripts/run_pilot.py --max-input-tokens-per-call 20000 --max-cost-usd 20`.
+   Expect 24 pairs, `already charged ... $0.0000`, and no refusal.
+4. On authorisation only: the same command plus `--confirm`. After any stop: inspect, then (with approval) the same command plus
+   `--resume --confirm`. Never a new `--db`.
