@@ -42,6 +42,7 @@ from src.experiments.runner import check_condition_label, make_budget, run_batch
 from src.negotiation.usage import Budget, Prices
 from src.storage.db import (append_ledger, get_connection, ledger_calls, load_budget_caps,
                             save_budget_caps)
+from src.zero_cost import require_paid_calls
 
 PILOT_SEEDS = (30000, 30001, 30002)
 CONDITIONS = ("baseline_v1", "structured_v1")
@@ -302,6 +303,8 @@ async def run_pilot(claude_cfg: GenerationConfig, openai_cfg: GenerationConfig, 
     budget. Stops at the first batch that does not complete all its
     negotiations (budget stop or exhausted transport reruns); that batch's run
     row records why. resume=True continues an existing pilot database."""
+    if client_factory is None:  # real SDK clients: refused before any file or lock is created
+        require_paid_calls("the paid pilot")
     caps = dict(max_total_tokens=max_total_tokens, max_cost_usd=max_cost_usd,
                 max_input_tokens_per_call=max_input_tokens_per_call)
     prepare_pilot(claude_cfg, openai_cfg, db_path, **caps, prices=prices,  # refuse before any lock file

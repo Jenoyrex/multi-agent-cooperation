@@ -16,6 +16,7 @@ from src.agents.parsing import parse_action
 from src.agents.prompting import BASELINE_VARIANT, build_prompt, check_variant, system_instructions
 from src.agents.schema import InvalidAgentOutputError, NegotiationAction, TransportError, allocation_json_schema
 from src.environment.resources import DEFAULT_CATEGORY_NAMES
+from src.zero_cost import require_paid_calls
 
 ALLOCATION_DESCRIPTION = (
     "Required if action_type is OFFER. Maps each category name to "
@@ -61,6 +62,7 @@ class OpenAIAgent(Agent):
 
     def _get_client(self):
         if self._client is None:
+            require_paid_calls("building a real OpenAI client")
             import openai  # local import: keeps this optional for mock-only runs
             self._client = openai.AsyncOpenAI(  # reads OPENAI_API_KEY from env
                 timeout=self.config.timeout_s, max_retries=0,

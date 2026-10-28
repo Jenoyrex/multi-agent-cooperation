@@ -37,6 +37,7 @@ from src.agents.parsing import parse_action
 from src.agents.prompting import build_prompt, system_instructions
 from src.agents.schema import InvalidAgentOutputError, NegotiationAction, TransportError
 from src.experiments.config import APPROVED_OPERATIONAL, APPROVED_SCIENTIFIC
+from src.zero_cost import require_loopback
 
 CONTRACT = "negotiation-lab/1"
 KINDS = ("scripted", "claude", "openai", "http")
@@ -185,6 +186,7 @@ class HTTPAgent(Agent):
         there the caller's wait_for ends the turn, but this thread may run on. Redirects are never followed
         (http.client does not follow them); any non-2xx is a TransportError."""
         u = urlparse(self.url)
+        require_loopback(u.hostname, "an HTTP agent request")  # raised before any connection exists
         headers = {"Content-Type": "application/json", "Accept": "application/json",
                    "User-Agent": "negotiation-lab/1"}
         if self._token:

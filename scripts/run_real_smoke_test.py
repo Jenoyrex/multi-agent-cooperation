@@ -27,6 +27,7 @@ load_dotenv()
 from src.agents.claude_agent import ClaudeAgent
 from src.agents.generation import GenerationConfig
 from src.agents.openai_agent import OpenAIAgent
+from src.zero_cost import require_paid_calls
 from src.evaluation.metrics import equitability, envy_freeness, social_welfare_efficiency
 from src.experiments.config import ExperimentConfig
 from src.experiments.runner import run_batch
@@ -35,6 +36,7 @@ RESULTS_DB = Path(__file__).resolve().parent.parent / "results" / "real_smoke_te
 
 
 async def main():
+    require_paid_calls("the real-model smoke test")  # zero-cost mode: refused before any agent exists
     print("=== REAL-MODEL SMOKE TEST (Claude vs GPT, 3 negotiations, real API cost) ===\n")
 
     config = ExperimentConfig(

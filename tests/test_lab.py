@@ -32,6 +32,7 @@ from src.environment.optimum import compute_optimal_welfare
 from src.environment.resources import generate_resource_pool
 from src.environment.valuations import generate_valuation
 from src.experiments import provenance as P
+from src import zero_cost
 from src.negotiation.protocol import EvaluatorState, NegotiationAborted, NegotiationRecord, NegotiationSession
 
 SECRET = "5ec7e7" + "a1" * 29  # 64 hex characters = 32 bytes
@@ -684,9 +685,17 @@ class _DownProvider(Agent):
         raise TransportError("provider unavailable")
 
 
-@pytest.mark.parametrize("url", ["http://a..b/", f"http://{'a' * 64}.example/"])  # empty / overlong IDNA label
-def test_idna_invalid_hostname_is_an_agent_failure(url):  # fails in IDNA encoding, before any network call
-    ev = _evaluate(SCRIPTED, {"kind": "http", "url": url, "label": "badhost"})
+BAD_HOSTS = ["http://a..b/", f"http://{'a' * 64}.example/"]  # empty / overlong IDNA label
+
+
+@pytest.mark.parametrize("url", BAD_HOSTS)
+def test_idna_invalid_hostname_is_an_agent_failure(url, monkeypatch):  # fails in IDNA encoding, before any network call
+    # Only reachable with remote agents unlocked (zero-cost mode refuses them first, see the next test);
+    # the tripwire keeps it offline regardless.
+    monkeypatch.setenv(zero_cost.ENV, "1")
+    with zero_cost.network_tripwire() as blocked:
+        ev = _evaluate(SCRIPTED, {"kind": "http", "url": url, "label": "badhost"})
+    assert blocked == []
     s = ev["summary"]
     assert ev["status"] == "stopped" and ev["error"]["title"] == "Agent Y did not answer"  # not "Unexpected error"
     assert len(ev["trials"]) == E.MAX_ABORTS
@@ -697,6 +706,15 @@ def test_idna_invalid_hostname_is_an_agent_failure(url):  # fails in IDNA encodi
     assert s["aborts_by_class"] == {"agent_failure": E.MAX_ABORTS, "provider_failure": 0, "budget_exhausted": 0}
     assert s["failures"]["Y"]["agent_failures"] == E.MAX_ABORTS and s["failures"]["X"]["agent_failures"] == 0
     assert s["used"] == 0 and s["outcomes"]["agreed"] is None
+
+
+@pytest.mark.parametrize("url", BAD_HOSTS + ["https://agent.example.org/turn"])
+def test_zero_cost_mode_refuses_remote_http_agents_before_any_network_call(url):
+    with zero_cost.network_tripwire() as blocked:
+        ev = _evaluate(SCRIPTED, {"kind": "http", "url": url, "label": "remote"})
+    assert blocked == [] and ev["status"] == "stopped"
+    assert all(t["status"] != "completed" for t in ev["trials"])
+    assert "ZeroCostViolation" in json.dumps(ev) or "Zero-cost mode refused" in json.dumps(ev)
 
 
 def test_provider_failure_is_not_attributed(monkeypatch):  # 23
