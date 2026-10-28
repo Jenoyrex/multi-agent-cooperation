@@ -22,14 +22,14 @@ from typing import Optional
 from src.negotiation.protocol import NegotiationAborted, NegotiationRecord
 from src.negotiation.usage import Prices, summarize_calls
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3  # 3: CHECK constraints on frozen outcome semantics (spec §8.5)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS runs (
     run_id TEXT PRIMARY KEY,
     started_at REAL NOT NULL,
     finished_at REAL,
-    status TEXT NOT NULL,              -- running|completed|incomplete|budget_exhausted|failed
+    status TEXT NOT NULL CHECK (status IN ('running', 'completed', 'incomplete', 'budget_exhausted', 'failed')),
     method TEXT NOT NULL,
     mode TEXT NOT NULL,
     base_seed INTEGER NOT NULL,
@@ -54,11 +54,11 @@ CREATE TABLE IF NOT EXISTS negotiations (
     method TEXT NOT NULL,
     model_A TEXT NOT NULL,
     model_B TEXT NOT NULL,
-    first_mover TEXT NOT NULL,
+    first_mover TEXT NOT NULL CHECK (first_mover IN ('A', 'B')),
     first_mover_policy TEXT NOT NULL DEFAULT 'explicit',
     max_rounds INTEGER NOT NULL,
-    outcome TEXT NOT NULL,
-    invalid_reason TEXT,
+    outcome TEXT NOT NULL CHECK (outcome IN ('agreed', 'walked_away', 'timeout', 'invalid_action')),
+    invalid_reason TEXT CHECK (invalid_reason IN ('malformed_output', 'invalid_allocation', 'illegal_accept')),
     invalid_detail TEXT,
     num_rounds INTEGER NOT NULL,
     utility_A REAL NOT NULL,
@@ -78,7 +78,11 @@ CREATE TABLE IF NOT EXISTS negotiations (
     latency_s REAL,
     cost_usd REAL,
     timestamp REAL NOT NULL,
-    UNIQUE (run_id, negotiation_index)
+    UNIQUE (run_id, negotiation_index),
+    -- spec §8.5/§8.6: a reason iff invalid_action; an allocation iff agreed; failures score 0
+    CHECK ((outcome = 'invalid_action') = (invalid_reason IS NOT NULL)),
+    CHECK ((outcome = 'agreed') = (final_allocation_json IS NOT NULL AND final_allocation_json != 'null')),
+    CHECK (outcome = 'agreed' OR (utility_A = 0 AND utility_B = 0))
 );
 
 CREATE TABLE IF NOT EXISTS aborted_negotiations (
@@ -86,7 +90,7 @@ CREATE TABLE IF NOT EXISTS aborted_negotiations (
     run_id TEXT NOT NULL REFERENCES runs(run_id),
     negotiation_index INTEGER NOT NULL,
     attempt_number INTEGER NOT NULL,   -- 1-based; each attempt is a full re-run
-    reason TEXT NOT NULL,              -- transport_failure|budget_exhausted
+    reason TEXT NOT NULL CHECK (reason IN ('transport_failure', 'budget_exhausted')),
     detail TEXT NOT NULL,
     actor TEXT NOT NULL,
     round_number INTEGER NOT NULL,
