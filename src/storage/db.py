@@ -10,6 +10,11 @@ Three tables:
   aborted_negotiations  infrastructure failures (transport failure, budget
                         exhausted). Never counted as an outcome; the partial
                         transcript and call log are kept for diagnostics.
+
+A persistent run budget (the pilot's, see src/experiments/pilot.py) adds:
+  budget_caps           the one set of caps the budget was opened with.
+  budget_ledger         every call charged to it, written as it is charged, so
+                        a later invocation resumes the same totals.
 """
 from __future__ import annotations
 
@@ -105,6 +110,22 @@ CREATE TABLE IF NOT EXISTS aborted_negotiations (
     cost_usd REAL,
     timestamp REAL NOT NULL,
     UNIQUE (run_id, negotiation_index, attempt_number)
+);
+
+CREATE TABLE IF NOT EXISTS budget_caps (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    max_total_tokens INTEGER,
+    max_cost_usd REAL,
+    max_input_tokens_per_call INTEGER NOT NULL,
+    created_at REAL NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS budget_ledger (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    recorded_at REAL NOT NULL,
+    call_json TEXT NOT NULL,           -- the call as passed to Budget.add (replayed on resume)
+    charged_tokens INTEGER NOT NULL,   -- what Budget.add charged for this call (checked on replay)
+    charged_cost_usd REAL NOT NULL
 );
 """
 
@@ -291,3 +312,30 @@ def run_totals(conn: sqlite3.Connection, run_id: str) -> dict:
 def load_all(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     conn.row_factory = sqlite3.Row
     return conn.execute("SELECT * FROM negotiations").fetchall()
+
+
+# ------------------------------------------------------------ budget ledger
+CAP_FIELDS = ("max_total_tokens", "max_cost_usd", "max_input_tokens_per_call")
+
+
+def load_budget_caps(conn: sqlite3.Connection) -> Optional[dict]:
+    row = conn.execute(f"SELECT {', '.join(CAP_FIELDS)} FROM budget_caps WHERE id = 1").fetchone()
+    return dict(zip(CAP_FIELDS, row)) if row else None
+
+
+def save_budget_caps(conn: sqlite3.Connection, caps: dict) -> None:
+    conn.execute(f"INSERT INTO budget_caps (id, {', '.join(CAP_FIELDS)}, created_at) VALUES (1, ?, ?, ?, ?)",
+                 (*(caps[k] for k in CAP_FIELDS), time.time()))
+    conn.commit()
+
+
+def append_ledger(conn: sqlite3.Connection, call: dict, charged_tokens: int, charged_cost_usd: float) -> None:
+    conn.execute("INSERT INTO budget_ledger (recorded_at, call_json, charged_tokens, charged_cost_usd) "
+                 "VALUES (?, ?, ?, ?)", (time.time(), json.dumps(call, default=str), charged_tokens, charged_cost_usd))
+    conn.commit()
+
+
+def ledger_calls(conn: sqlite3.Connection) -> list[tuple]:
+    """(call, charged_tokens, charged_cost_usd) per ledger row, in order."""
+    return [(json.loads(c), t, d) for c, t, d in conn.execute(
+        "SELECT call_json, charged_tokens, charged_cost_usd FROM budget_ledger ORDER BY id")]

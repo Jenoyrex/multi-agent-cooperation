@@ -4,17 +4,29 @@ as 8 pilot-mode batches of 3, with the frozen runtime configuration (§8.15).
 
 Everything is checked before the first API call: the budget values, a price
 for both approved models, the condition label and the approved runtime of
-every cell, and that one call's worst case fits in the budget. One Budget is
-shared by all 8 batches, so the caps apply to the whole pilot.
+every cell, and that one call's worst case fits in the budget.
+
+One budget covers the whole pilot, across invocations. It lives in the pilot
+database: its caps are fixed when the database is created, every call is
+written to a ledger as it is charged, and a later invocation (resume=True)
+replays that ledger, so a restart never starts from a fresh cap. A call that
+was in flight when an invocation died was never charged, so each run left
+'running' or 'failed' is charged one worst-case call. A resume runs only the
+(cell, seed) pairs that have no record yet; a pair whose transport reruns were
+used up is reported as blocked and never re-run automatically (§8.15). Only
+one invocation can use a pilot database at a time.
 
 Pilot data stays out of the confirmatory dataset: it goes to its own
-database (which must not exist yet), every run is stored with mode='pilot',
-and its seeds (30000-30002) are disjoint from the full run's (40000-40059).
+database, every run is stored with mode='pilot', and its seeds (30000-30002)
+are disjoint from the full run's (40000-40059).
 """
 from __future__ import annotations
 
 import itertools
+import json
 import math
+import sqlite3
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, List, Optional
@@ -23,10 +35,13 @@ from src.agents.claude_agent import ClaudeAgent
 from src.agents.generation import GenerationConfig
 from src.agents.openai_agent import OpenAIAgent
 from src.agents.prompting import INSTRUCTION_VARIANTS
+from src.experiments import provenance
 from src.experiments.config import (APPROVED_MAX_ROUNDS, APPROVED_MAX_TRANSPORT_RERUNS,
                                     APPROVED_PRICES, ExperimentConfig, check_approved_runtime)
 from src.experiments.runner import check_condition_label, make_budget, run_batch
 from src.negotiation.usage import Budget, Prices
+from src.storage.db import (append_ledger, get_connection, ledger_calls, load_budget_caps,
+                            save_budget_caps)
 
 PILOT_SEEDS = (30000, 30001, 30002)
 CONDITIONS = ("baseline_v1", "structured_v1")
@@ -57,14 +72,15 @@ def pilot_matrix() -> List[tuple]:
 
 
 def pilot_config(cell: PilotCell, max_total_tokens=None, max_cost_usd=None,
-                 max_input_tokens_per_call=None) -> ExperimentConfig:
+                 max_input_tokens_per_call=None, base_seed: int = PILOT_SEEDS[0],
+                 num_negotiations: int = len(PILOT_SEEDS)) -> ExperimentConfig:
     return ExperimentConfig(
         mode="pilot",
         method=cell.condition,
         model_A_label="claude" if cell.claude_seat == "A" else "openai",
         model_B_label="openai" if cell.claude_seat == "A" else "claude",
-        num_negotiations=len(PILOT_SEEDS),
-        base_seed=PILOT_SEEDS[0],
+        num_negotiations=num_negotiations,
+        base_seed=base_seed,
         max_rounds=APPROVED_MAX_ROUNDS,
         num_categories=3,
         first_mover_policy=cell.first_mover,
@@ -85,11 +101,11 @@ def pilot_agents(cell: PilotCell, claude_cfg: GenerationConfig, openai_cfg: Gene
     return (claude, gpt) if cell.claude_seat == "A" else (gpt, claude)
 
 
-def pilot_worst_case(budget: Budget) -> dict:
-    """Upper bound for the planned pilot if every negotiation uses all
-    rounds and every call its reserved worst case (transport reruns, which
+def pilot_worst_case(budget: Budget, negotiations: int = len(PILOT_CELLS) * len(PILOT_SEEDS)) -> dict:
+    """Upper bound for `negotiations` planned negotiations if every one uses
+    all rounds and every call its reserved worst case (transport reruns, which
     re-run whole negotiations, can add up to x(1 + max_transport_reruns))."""
-    calls_per_model = len(pilot_matrix()) * math.ceil(APPROVED_MAX_ROUNDS / 2)
+    calls_per_model = negotiations * math.ceil(APPROVED_MAX_ROUNDS / 2)
     tokens, cost = 0, 0.0
     for model, (max_in, max_out, attempts) in budget.reserve.items():
         tokens += calls_per_model * attempts * (max_in + max_out)
@@ -98,48 +114,219 @@ def pilot_worst_case(budget: Budget) -> dict:
     return {"calls_per_model": calls_per_model, "worst_case_tokens": tokens, "worst_case_cost_usd": cost}
 
 
+# ------------------------------------------------------- persistent budget
+class PersistentBudget(Budget):
+    """The pilot's Budget, kept in its database: each charge is written to the
+    ledger before the next call can start."""
+
+    def __init__(self, conn: sqlite3.Connection, budget: Budget):
+        super().__init__(budget.max_total_tokens, budget.max_cost_usd, budget.prices, budget.reserve)
+        self._conn = conn
+
+    def add(self, call: dict) -> None:
+        tokens, cost = self.spent_tokens, self.spent_cost_usd
+        super().add(call)
+        append_ledger(self._conn, call, self.spent_tokens - tokens, self.spent_cost_usd - cost)
+
+
+def _restore(budget: Budget, conn: sqlite3.Connection) -> Budget:
+    """Replay the ledger into `budget` (without writing it again) and charge
+    one worst-case call per interrupted run. Every replayed call must charge
+    what it charged when recorded, or the ledger is refused."""
+    for n, (call, charged_tokens, charged_cost) in enumerate(ledger_calls(conn), start=1):
+        tokens, cost = budget.spent_tokens, budget.spent_cost_usd
+        Budget.add(budget, call)
+        if (budget.spent_tokens - tokens != charged_tokens
+                or not math.isclose(budget.spent_cost_usd - cost, charged_cost, rel_tol=1e-9, abs_tol=1e-12)):
+            raise ValueError(f"Budget ledger row {n} does not replay to the charge recorded for it; "
+                             "refusing to trust this pilot's spend.")
+    interrupted = conn.execute("SELECT COUNT(*) FROM runs WHERE status IN ('running', 'failed')").fetchone()[0]
+    tokens, cost = budget.next_call_reserve()
+    budget.spent_tokens += interrupted * tokens
+    budget.spent_cost_usd += interrupted * cost
+    return budget
+
+
+def _read_only(db_path) -> sqlite3.Connection:
+    return sqlite3.connect(Path(db_path).resolve().as_uri() + "?mode=ro", uri=True)
+
+
+def _is_pilot_db(path: Path) -> bool:
+    try:
+        conn = _read_only(path)
+        try:
+            return load_budget_caps(conn) is not None
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return False
+
+
+@contextmanager
+def _single_invocation(db_path):
+    """An exclusive lock on <db>.lock for the whole invocation, so two
+    invocations can never run (and spend) at once. The OS releases it if the
+    process dies."""
+    lock = sqlite3.connect(f"{db_path}.lock", timeout=0, isolation_level=None)
+    try:
+        lock.execute("BEGIN EXCLUSIVE")
+    except sqlite3.OperationalError as exc:
+        lock.close()
+        raise ValueError(f"Another pilot invocation is using {db_path}; refusing to start a second one.") from exc
+    try:
+        yield
+    finally:
+        lock.close()
+
+
+# ---------------------------------------------------------------- progress
+def pilot_progress(conn: sqlite3.Connection, claude_cfg: GenerationConfig,
+                   openai_cfg: GenerationConfig, prices: Optional[Prices]) -> dict:
+    """{(cell index, seed): 'done' | 'blocked'} for the pairs that need no
+    further run; pairs absent from it are still to run. Raises ValueError if
+    the database holds anything but this pilot under the current protocol,
+    prompts, spec and runtime, or a (cell, seed) recorded more than once."""
+    cells = {(c.condition, c.claude_seat, c.first_mover): c.index for c in PILOT_CELLS}
+    expect = {"protocol_id": provenance.PROTOCOL_ID, "spec_version": provenance.spec_version(),
+              "prompt_hash": provenance.prompt_hash()}
+    generation = {"ClaudeAgent": claude_cfg.to_dict(), "OpenAIAgent": openai_cfg.to_dict()}
+    stored_prices = json.loads(json.dumps(prices))
+    runs = {}
+    for run_id, mode, method, policy, base_seed, cfg_json, *prov in conn.execute(
+            "SELECT run_id, mode, method, first_mover_policy, base_seed, config_json, "
+            "protocol_id, spec_version, prompt_hash FROM runs"):
+        cfg = json.loads(cfg_json)
+        seat = "A" if cfg["agents"]["A"]["class"] == "ClaudeAgent" else "B"
+        problems = [f"{k}={v!r}" for k, v in zip(expect, prov) if v != expect[k]]
+        problems += [f"{a['class']} settings" for a in cfg["agents"].values()
+                     if a["generation_config"] != generation.get(a["class"])]
+        if cfg["prices_usd_per_million_tokens"] != stored_prices:
+            problems.append("prices")
+        if mode != "pilot" or (method, seat, policy) not in cells or problems:
+            raise ValueError(f"Run {run_id} is not this pilot under the current configuration "
+                             f"(mode={mode}, cell={(method, seat, policy)}, differs: {problems or 'cell'}).")
+        runs[run_id] = (cells[(method, seat, policy)], base_seed)
+
+    def pair(run_id, index):
+        cell, base_seed = runs[run_id]
+        return cell, base_seed + index
+
+    progress, done = {}, []
+    for run_id, index, seed in conn.execute("SELECT run_id, negotiation_index, instance_seed FROM negotiations"):
+        key = pair(run_id, index)
+        if key[1] != seed or seed not in PILOT_SEEDS:
+            raise ValueError(f"Run {run_id} negotiation {index} has seed {seed}, expected {key[1]}.")
+        done.append(key)
+    dupes = sorted(k for k in set(done) if done.count(k) > 1)
+    if dupes:
+        raise ValueError(f"(cell, seed) recorded more than once: {dupes}")
+    for run_id, index in conn.execute(
+            "SELECT run_id, negotiation_index FROM aborted_negotiations WHERE reason = 'transport_failure'"):
+        progress[pair(run_id, index)] = "blocked"  # overwritten below if it was later completed
+    progress.update({k: "done" for k in done})
+    return progress
+
+
+def _remaining(progress: dict) -> List[tuple]:
+    """(cell, base_seed, n) batches covering the pairs still to run: per cell,
+    one batch per consecutive run of missing seeds (all 8 cells x 3 seeds on a
+    fresh database, exactly the preregistered batches)."""
+    batches = []
+    for cell in PILOT_CELLS:
+        todo = [s for s in PILOT_SEEDS if (cell.index, s) not in progress]
+        for _, group in itertools.groupby(enumerate(todo), lambda p: p[1] - p[0]):
+            seeds = [s for _, s in group]
+            batches.append((cell, seeds[0], len(seeds)))
+    return batches
+
+
+# ------------------------------------------------------------------ driver
 def prepare_pilot(claude_cfg: GenerationConfig, openai_cfg: GenerationConfig, db_path,
                   max_total_tokens=None, max_cost_usd=None, max_input_tokens_per_call=None,
-                  prices: Optional[Prices] = APPROVED_PRICES, client_factory=None):
-    """Validate everything and build (plan, shared budget). Raises ValueError
-    before any API call if anything is missing, invalid or unapproved."""
-    if Path(db_path).exists():
-        raise ValueError(f"{db_path} already exists; the pilot must go to a new database.")
+                  prices: Optional[Prices] = APPROVED_PRICES, client_factory=None, resume: bool = False):
+    """Validate everything and build (plan, budget): the batches still to run
+    and the budget with everything already charged. Raises ValueError before
+    any API call if anything is missing, invalid or unapproved. Writes nothing:
+    a resumed database is only read."""
+    db_path = Path(db_path)
+    if resume and not _is_pilot_db(db_path):
+        raise ValueError(f"{db_path} is not an existing pilot database; there is no pilot to resume.")
+    if not resume:
+        if db_path.exists():
+            raise ValueError(f"{db_path} already exists; the pilot must go to a new database "
+                             "(or resume it explicitly).")
+        others = sorted(p.name for p in db_path.parent.glob("*.db") if _is_pilot_db(p))
+        if others:
+            raise ValueError(f"Pilot database(s) {others} already exist in {db_path.parent}; a new pilot "
+                             "would start a fresh budget. Resume that pilot instead.")
     if max_total_tokens is None and max_cost_usd is None:
         raise ValueError("The pilot requires a token cap and/or a dollar cap.")
     missing = sorted(m for m in (claude_cfg.model, openai_cfg.model) if not prices or m not in prices)
     if missing:
         raise ValueError(f"No price entry for models: {missing}")
-    plan = []
+    agents = {}
     for cell in PILOT_CELLS:
         config = pilot_config(cell, max_total_tokens, max_cost_usd, max_input_tokens_per_call)
-        agent_A, agent_B = pilot_agents(cell, claude_cfg, openai_cfg, client_factory)
-        check_condition_label(config, [agent_A, agent_B])
-        check_approved_runtime(config, [agent_A, agent_B])
-        plan.append((cell, config, agent_A, agent_B))
-    _, config, agent_A, agent_B = plan[0]
-    budget = make_budget(config, [agent_A, agent_B], prices)
+        agents[cell] = pilot_agents(cell, claude_cfg, openai_cfg, client_factory)
+        check_condition_label(config, list(agents[cell]))
+        check_approved_runtime(config, list(agents[cell]))
+    budget = make_budget(pilot_config(PILOT_CELLS[0], max_total_tokens, max_cost_usd, max_input_tokens_per_call),
+                         list(agents[PILOT_CELLS[0]]), prices)
+    progress = {}
+    if resume:
+        conn = _read_only(db_path)
+        try:
+            caps = dict(max_total_tokens=max_total_tokens, max_cost_usd=max_cost_usd,
+                        max_input_tokens_per_call=max_input_tokens_per_call)
+            stored = load_budget_caps(conn)
+            if stored != caps:
+                raise ValueError(f"{db_path} was opened with budget caps {stored}; a resume must use "
+                                 f"the same caps, not {caps}.")
+            progress = pilot_progress(conn, claude_cfg, openai_cfg, prices)
+            _restore(budget, conn)
+        finally:
+            conn.close()
+    plan = [(cell, pilot_config(cell, max_total_tokens, max_cost_usd, max_input_tokens_per_call, base, n),
+             *agents[cell]) for cell, base, n in _remaining(progress)]
     why = budget.exceeded()
-    if why:
-        raise ValueError(f"Budget cannot cover even the first call: {why}")
+    if plan and why:
+        raise ValueError(f"Budget cannot cover even the first call of this invocation: {why}")
     return plan, budget
 
 
 async def run_pilot(claude_cfg: GenerationConfig, openai_cfg: GenerationConfig, db_path,
                     max_total_tokens=None, max_cost_usd=None, max_input_tokens_per_call=None,
-                    prices: Optional[Prices] = APPROVED_PRICES, client_factory=None) -> dict:
-    """Run the 8 pilot batches in order with one shared budget. Stops at the
-    first batch that does not complete all its negotiations (budget stop or
-    exhausted transport reruns); that batch's run row records why."""
-    plan, budget = prepare_pilot(claude_cfg, openai_cfg, db_path, max_total_tokens, max_cost_usd,
-                                 max_input_tokens_per_call, prices, client_factory)
-    batches = []
-    status = "completed"
-    for cell, config, agent_A, agent_B in plan:
-        records = await run_batch(config, agent_A, agent_B, db_path, prices=prices, budget=budget)
-        batches.append({"cell": cell, "negotiations": len(records)})
-        if len(records) != config.num_negotiations:
-            status = "stopped"
-            break
-    return {"status": status, "batches": batches, "spent_tokens": budget.spent_tokens,
-            "spent_cost_usd": budget.spent_cost_usd}
+                    prices: Optional[Prices] = APPROVED_PRICES, client_factory=None,
+                    resume: bool = False) -> dict:
+    """Run the pilot's remaining batches in order with its one persistent
+    budget. Stops at the first batch that does not complete all its
+    negotiations (budget stop or exhausted transport reruns); that batch's run
+    row records why. resume=True continues an existing pilot database."""
+    caps = dict(max_total_tokens=max_total_tokens, max_cost_usd=max_cost_usd,
+                max_input_tokens_per_call=max_input_tokens_per_call)
+    prepare_pilot(claude_cfg, openai_cfg, db_path, **caps, prices=prices,  # refuse before any lock file
+                  client_factory=client_factory, resume=resume)
+    with _single_invocation(db_path):
+        plan, prepared = prepare_pilot(  # again under the lock: another invocation may have run meanwhile
+            claude_cfg, openai_cfg, db_path, **caps, prices=prices, client_factory=client_factory, resume=resume)
+        conn = get_connection(db_path)
+        try:
+            if not resume:
+                save_budget_caps(conn, caps)
+            budget = _restore(PersistentBudget(conn, prepared), conn)  # same caps and reserve, spend from the DB
+            batches, status = [], "completed"
+            for cell, config, agent_A, agent_B in plan:
+                records = await run_batch(config, agent_A, agent_B, db_path, prices=prices, budget=budget)
+                batches.append({"cell": cell, "base_seed": config.base_seed, "negotiations": len(records)})
+                if len(records) != config.num_negotiations:
+                    status = "stopped"
+                    break
+            progress = pilot_progress(conn, claude_cfg, openai_cfg, prices)
+        finally:
+            conn.close()
+    blocked = sorted(k for k, v in progress.items() if v == "blocked")
+    done = sum(v == "done" for v in progress.values())
+    if status == "completed" and done != len(pilot_matrix()):
+        status = "incomplete"
+    return {"status": status, "batches": batches, "completed_negotiations": done, "blocked": blocked,
+            "spent_tokens": budget.spent_tokens, "spent_cost_usd": budget.spent_cost_usd}
