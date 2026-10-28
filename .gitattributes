@@ -1,0 +1,2 @@
+# Byte-reproducible simulation artifacts: hashes in REPORT.md assume LF
+artifacts/offline_simulation/* text eol=lf
