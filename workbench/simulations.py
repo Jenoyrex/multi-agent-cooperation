@@ -25,6 +25,7 @@ from src.agents.prompting import INSTRUCTION_VARIANTS
 from src.environment.allocation import Allocation
 from src.experiments import provenance
 from src.negotiation.protocol import EvaluatorState, NegotiationAborted, NegotiationSession
+from src import zero_cost
 from src.storage.db import _turn_to_dict
 from workbench import agents as A, environments as E, store
 from workbench.agents import WorkbenchError
@@ -43,7 +44,7 @@ class Cancelled(Exception):
 
 
 def resolve(table: str, builtin: dict, id_) -> Optional[dict]:
-    return builtin.get(id_) or (store.get(table, id_) if isinstance(id_, str) else None)
+    return (builtin.get(id_) or store.get(table, id_)) if isinstance(id_, str) else None  # a list or dict id is a 400, not a crash
 
 
 def validate(req) -> dict:
@@ -53,6 +54,8 @@ def validate(req) -> dict:
     if env is None:
         raise WorkbenchError("Choose an environment.", "environment")
     picked = req.get("agents") or {}
+    if not isinstance(picked, dict):
+        raise WorkbenchError("Agents must be an object: {\"X\": id, \"Y\": id}.", "agents")
     defs = {}
     for label in "XY":
         d = resolve("agents", A.BUILTIN, picked.get(label))
@@ -63,7 +66,7 @@ def validate(req) -> dict:
             raise WorkbenchError(f"Agent {label}, {d['name']}, cannot run: {kind.reason}", f"agents.{label}")
         defs[label] = d
     conds = req.get("conditions") or []
-    if not isinstance(conds, list) or not conds or any(c not in INSTRUCTION_VARIANTS for c in conds) or len(set(conds)) != len(conds):
+    if not isinstance(conds, list) or not conds or any(not isinstance(c, str) or c not in INSTRUCTION_VARIANTS for c in conds) or len(set(conds)) != len(conds):
         raise WorkbenchError(f"Choose one or both conditions: {', '.join(INSTRUCTION_VARIANTS)}.", "conditions")
     reps, seed = req.get("repetitions", 1), req.get("base_seed", 0)
     for v, lo, hi, what, where in ((reps, 1, MAX_REPETITIONS, "Repetitions", "repetitions"), (seed, 0, 2**31 - 1, "The base seed", "base_seed")):
@@ -73,7 +76,7 @@ def validate(req) -> dict:
     if not isinstance(swap_seats, bool) or not isinstance(swap_first, bool):
         raise WorkbenchError("The swap options must be true or false.", "swap_seats")
     pace = req.get("pace", "instant")
-    if pace not in PACE_S:
+    if not isinstance(pace, str) or pace not in PACE_S:
         raise WorkbenchError("Pace must be 'instant' or 'watch'.", "pace")
     total = reps * len(conds) * (2 if swap_seats else 1) * (2 if swap_first else 1)
     if total > MAX_NEGOTIATIONS:
@@ -141,7 +144,7 @@ class Simulation:
         self.cancel_requested, self.finished = False, None
         self.provenance = {"protocol_id": provenance.PROTOCOL_ID, "spec_version": provenance.spec_version(),
                            "prompt_hash": provenance.prompt_hash(), "code_version": provenance.code_version(),
-                           "engine": "src.negotiation.protocol.NegotiationSession (unchanged)", "zero_cost_mode": True}
+                           "engine": "src.negotiation.protocol.NegotiationSession (unchanged)", "zero_cost_mode": not zero_cost.paid_calls_allowed()}
         self._lock = threading.Lock()
 
     def note(self, text: str, level: str = "info"):
@@ -228,7 +231,9 @@ def execute(sim: Simulation) -> None:
                 sim.trials.append(trial)
             store.put("simulations", sim.doc())
         with sim._lock:
-            sim.status = "cancelled" if sim.cancel_requested and len(sim.trials) < len(sim.plan) else "completed"
+            # A negotiation cut short by cancelling is not a completed plan, even when it was the last one.
+            stopped = len(sim.trials) < len(sim.plan) or any(t["status"] == "cancelled" for t in sim.trials)
+            sim.status = "cancelled" if sim.cancel_requested and stopped else "completed"
     except Exception as exc:  # noqa: BLE001 — recorded on the simulation; traceback to the server log
         traceback.print_exc()
         with sim._lock:

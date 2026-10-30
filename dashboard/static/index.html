@@ -1,14 +1,16 @@
 <!doctype html>
-<html lang="en" data-theme="dark">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Cooperation Lab · Negotiation Lab</title>
-<meta name="description" content="An interactive laboratory where two AI agents with private preferences negotiate how to divide shared resources, backed by a controlled research experiment.">
+<title>Cooperation Lab</title>
+<meta name="theme-color" content="#f5f5f7">
+<meta name="description" content="A zero-cost platform for multi-agent negotiation experiments: configure agents, define resources, run experiments and explore behavioural analytics, alongside a preregistered research study.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect x='3' y='14' width='26' height='4' rx='1' fill='%2359636b'/><rect x='3' y='14' width='15' height='4' rx='1' fill='%23199e70'/><circle cx='18' cy='16' r='5' fill='none' stroke='%23edf1f3' stroke-width='2'/></svg>">
-<script>try{const t=localStorage.getItem('theme');if(t)document.documentElement.dataset.theme=t}catch(e){}</script>
-<link rel="preload" href="fonts/barlow-semi-condensed-latin-600-normal.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="preload" href="fonts/barlow-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
+<script>(function(){var d=document.documentElement,t="system",m="system";try{t=localStorage.getItem("theme")||t;m=localStorage.getItem("motion")||m}catch(e){}
+if(t==="system")t=matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light";d.dataset.theme=t;if(m==="reduce")d.dataset.motion="reduce";
+document.querySelector('meta[name="theme-color"]').content=t==="dark"?"#0b0b0d":"#f5f5f7"})()</script>
+<link rel="preload" href="fonts/inter-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="app.css">
 </head>
 <body>
@@ -28,37 +30,62 @@
   <symbol id="i-walk" viewBox="0 0 16 16"><path d="M9.5 3H13v10H9.5M6.5 5 3.5 8l3 3M3.5 8H10"/></symbol>
   <symbol id="i-swap" viewBox="0 0 18 16"><path d="M2 5.5h13.5M12.5 2.5l3 3-3 3M16 10.5H2.5M5.5 7.5l-3 3 3 3"/></symbol>
   <symbol id="i-clock" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.8"/><path d="M8 4.8V8h2.6"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 16 16"><path d="M8 3v10M3 8h10"/></symbol>
+  <symbol id="i-home" viewBox="0 0 16 16"><path d="M2.5 7.2 8 2.8l5.5 4.4V13a.8.8 0 0 1-.8.8H9.6V10H6.4v3.8H3.3a.8.8 0 0 1-.8-.8Z"/></symbol>
+  <symbol id="i-users" viewBox="0 0 16 16"><circle cx="6" cy="5.5" r="2.3"/><path d="M1.8 13.2c.5-2.3 2.2-3.6 4.2-3.6s3.7 1.3 4.2 3.6"/><path d="M10.6 3.4a2.3 2.3 0 0 1 0 4.3M11.6 9.8c1.3.4 2.3 1.6 2.6 3.4"/></symbol>
+  <symbol id="i-box" viewBox="0 0 16 16"><path d="M8 1.8 13.6 5v6L8 14.2 2.4 11V5Z"/><path d="M2.4 5 8 8.2 13.6 5M8 8.2v6"/></symbol>
+  <symbol id="i-flask" viewBox="0 0 16 16"><path d="M6.2 2h3.6M6.7 2v4.2L2.9 12.4a1.1 1.1 0 0 0 .9 1.6h8.4a1.1 1.1 0 0 0 .9-1.6L9.3 6.2V2"/><path d="M4.6 9.6h6.8"/></symbol>
+  <symbol id="i-chart" viewBox="0 0 16 16"><path d="M2.5 13.5h11"/><rect x="3.5" y="8" width="2.2" height="4" rx=".5"/><rect x="7" y="4.5" width="2.2" height="7.5" rx=".5"/><rect x="10.5" y="6.5" width="2.2" height="5.5" rx=".5"/></symbol>
+  <symbol id="i-doc" viewBox="0 0 16 16"><path d="M4 1.8h5.2L12.5 5v8.4a.8.8 0 0 1-.8.8H4.3a.8.8 0 0 1-.8-.8V2.6a.8.8 0 0 1 .5-.8Z"/><path d="M9 1.9V5.3h3.4M5.8 8.3h4.4M5.8 10.8h4.4"/></symbol>
+  <symbol id="i-gear" viewBox="0 0 16 16"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.6v1.7M8 12.7v1.7M14.4 8h-1.7M3.3 8H1.6M12.5 3.5l-1.2 1.2M4.7 11.3l-1.2 1.2M12.5 12.5l-1.2-1.2M4.7 4.7 3.5 3.5"/></symbol>
+  <symbol id="i-book" viewBox="0 0 16 16"><path d="M2.5 3.2c2-.8 3.8-.8 5.5.6 1.7-1.4 3.5-1.4 5.5-.6v9.6c-2-.8-3.8-.8-5.5.6-1.7-1.4-3.5-1.4-5.5-.6Z"/><path d="M8 3.8v9.6"/></symbol>
+  <symbol id="i-play" viewBox="0 0 16 16"><path d="M4.8 3.2v9.6L12.6 8Z"/></symbol>
+  <symbol id="i-compare" viewBox="0 0 16 16"><rect x="2" y="3" width="5" height="10" rx="1"/><rect x="9" y="3" width="5" height="10" rx="1"/></symbol>
+  <symbol id="i-terminal" viewBox="0 0 16 16"><rect x="1.8" y="2.8" width="12.4" height="10.4" rx="1.6"/><path d="m4.6 6.4 2 1.6-2 1.6M8.2 10h3"/></symbol>
+  <symbol id="i-list" viewBox="0 0 16 16"><path d="M5.5 4h8M5.5 8h8M5.5 12h8"/><circle cx="2.8" cy="4" r=".6"/><circle cx="2.8" cy="8" r=".6"/><circle cx="2.8" cy="12" r=".6"/></symbol>
+  <symbol id="i-sliders" viewBox="0 0 16 16"><path d="M2.5 4.5h11M2.5 11.5h11"/><circle cx="6" cy="4.5" r="1.8"/><circle cx="10.5" cy="11.5" r="1.8"/></symbol>
+  <symbol id="i-upload" viewBox="0 0 16 16"><path d="M8 10.5V2.8M4.8 5.8 8 2.6l3.2 3.2"/><path d="M2.8 10.5v1.9c0 .5.4.9.9.9h8.6c.5 0 .9-.4.9-.9v-1.9"/></symbol>
+  <symbol id="i-download" viewBox="0 0 16 16"><path d="M8 2.6v7.7M4.8 7.1 8 10.3l3.2-3.2"/><path d="M2.8 10.5v1.9c0 .5.4.9.9.9h8.6c.5 0 .9-.4.9-.9v-1.9"/></symbol>
+  <symbol id="i-cloud" viewBox="0 0 16 16"><path d="M4.6 12.6a2.9 2.9 0 0 1-.4-5.8 3.9 3.9 0 0 1 7.5-.8 3.3 3.3 0 0 1 .3 6.6Z"/></symbol>
+  <symbol id="i-bolt" viewBox="0 0 16 16"><path d="M9 1.8 3.6 9h4l-.8 5.2L12.4 7h-4Z"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 16 16"><rect x="5" y="5" width="8.4" height="8.4" rx="1.4"/><path d="M10.6 5V3.4c0-.5-.4-.9-.9-.9H3.4c-.5 0-.9.4-.9.9v6.3c0 .5.4.9.9.9H5"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 16 16"><path d="M2.8 4.3h10.4M6.2 4.3V2.8h3.6v1.5M4.1 4.3l.6 8.9c0 .5.4.8.9.8h4.8c.5 0 .9-.3.9-.8l.6-8.9"/></symbol>
 </svg>
 <canvas id="field" aria-hidden="true"></canvas>
 <a class="skip" href="#main">Skip to content</a>
 <div class="shell">
   <aside class="rail" aria-label="Primary">
     <a class="brand" href="#/">
-      <svg viewBox="0 0 34 22" aria-hidden="true"><rect x="1" y="9" width="32" height="4" rx="1" fill="var(--scale)"/><rect x="1" y="9" width="18" height="4" rx="1" fill="var(--claude)"/><rect x="19" y="9" width="14" height="4" rx="1" fill="var(--openai)"/><circle cx="19" cy="11" r="6" fill="none" stroke="var(--ink)" stroke-width="1.6"/></svg>
-      <span><b>Cooperation Lab</b><small>AI negotiation laboratory</small></span>
+      <svg viewBox="0 0 34 22" aria-hidden="true"><rect x="1" y="9" width="32" height="4" rx="2" fill="var(--scale)"/><rect x="1" y="9" width="18" height="4" rx="2" fill="var(--base)"/><rect x="19" y="9" width="14" height="4" rx="2" fill="var(--struct)"/><circle cx="19" cy="11" r="6" fill="none" stroke="var(--ink)" stroke-width="1.6"/></svg>
+      <span><b>Cooperation Lab</b><small>Multi-agent experiments</small></span>
     </a>
     <nav>
-      <div class="navgroup"><span>Negotiation Lab</span>
-        <a href="#/" data-route="home">Home</a>
-        <a href="#/try" data-route="try" class="nav-try">Try a negotiation</a>
-        <a href="#/compare" data-route="compare">Compare</a>
-        <a href="#/lab" data-route="lab">Agent Lab</a>
+      <div class="navgroup"><span>Workspace</span>
+        <a href="#/" data-route="start"><svg class="icon"><use href="#i-home"/></svg>Start</a>
+        <a href="#/agents" data-route="agents"><svg class="icon"><use href="#i-users"/></svg>Agents</a>
+        <a href="#/environments" data-route="environments"><svg class="icon"><use href="#i-box"/></svg>Resources</a>
+        <a href="#/simulations" data-route="simulations"><svg class="icon"><use href="#i-flask"/></svg>Experiments</a>
+        <a href="#/analytics" data-route="analytics"><svg class="icon"><use href="#i-chart"/></svg>Analytics</a>
+        <a href="#/reports" data-route="reports"><svg class="icon"><use href="#i-doc"/></svg>Reports</a>
       </div>
-      <div class="navgroup"><span>Workbench</span>
-        <a href="#/workbench" data-route="workbench">Overview</a>
-        <a href="#/agents" data-route="agents">Agents</a>
-        <a href="#/environments" data-route="environments">Environments</a>
-        <a href="#/simulations" data-route="simulations">Simulations</a>
+      <div class="navgroup"><span>Playground</span>
+        <a href="#/try" data-route="try"><svg class="icon"><use href="#i-play"/></svg>Try a negotiation</a>
+        <a href="#/compare" data-route="compare"><svg class="icon"><use href="#i-compare"/></svg>Compare runs</a>
+        <a href="#/lab" data-route="lab"><svg class="icon"><use href="#i-terminal"/></svg>Agent Lab</a>
       </div>
-      <div class="navgroup"><span>Research</span>
-        <a href="#/experiments" data-route="experiments">Experiments <b class="count" id="nav-status" title="Controlled negotiations recorded"></b></a>
-        <a href="#/results" data-route="results">Results</a>
-        <a href="#/methodology" data-route="methodology">Methodology</a>
-        <a href="#/configuration" data-route="configuration">Configuration</a>
+      <div class="navgroup"><span>Research study</span>
+        <a href="#/study" data-route="study"><svg class="icon"><use href="#i-book"/></svg>Overview</a>
+        <a href="#/experiments" data-route="experiments"><svg class="icon"><use href="#i-list"/></svg>Data collection <b class="count" id="nav-status" title="Controlled negotiations recorded"></b></a>
+        <a href="#/results" data-route="results"><svg class="icon"><use href="#i-chart"/></svg>Results</a>
+        <a href="#/methodology" data-route="methodology"><svg class="icon"><use href="#i-doc"/></svg>Methodology</a>
+        <a href="#/configuration" data-route="configuration"><svg class="icon"><use href="#i-sliders"/></svg>Configuration</a>
+      </div>
+      <div class="navgroup">
+        <a href="#/settings" data-route="settings"><svg class="icon"><use href="#i-gear"/></svg>Settings</a>
       </div>
     </nav>
     <div class="rail-foot">
-      <span class="live" id="live" title="Research data is read-only and refreshed every 10 seconds. Only Try-it sandbox runs can be started here, and they are stored separately."><i></i><span>Research data read-only · live</span></span>
+      <span class="live" id="live" title="Research study data is read-only and refreshed every 10 seconds."><i></i><span>Study data live</span></span>
       <button class="theme" id="theme" type="button" aria-label="Switch between dark and light theme">
         <svg class="icon sun"><use href="#i-sun"/></svg><svg class="icon moon"><use href="#i-moon"/></svg>
       </button>

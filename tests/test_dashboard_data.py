@@ -65,7 +65,7 @@ def test_empty_results_dir_shows_no_data(tmp_path):
     snap = D.Store(tmp_path).snapshot()
     assert snap["negotiations"] == [] and snap["databases"] == []
     assert snap["progress"]["pilot"] == {"done": 0, "target": 24}
-    assert snap["progress"]["full"] == {"done": 0, "target": 480}
+    assert snap["progress"]["full"] == {"done": 0, "target": 480, "design_complete": False}
     assert snap["results"]["pilot"]["pooled"] is None
     assert snap["results"]["full"]["locked"] is True
     assert list(tmp_path.iterdir()) == []  # nothing created
@@ -127,7 +127,7 @@ def test_incomplete_full_run_is_locked(tmp_path):
     full = snap["results"]["full"]
     assert full["locked"] is True and full["n"] == 2
     assert full["by_condition"] == {} and full["paired"] == [] and full["pooled"] is None
-    assert snap["progress"]["full"] == {"done": 2, "target": 480}
+    assert snap["progress"]["full"] == {"done": 2, "target": 480, "design_complete": False}
 
 
 def test_invalid_action_turn_is_shown_with_the_right_actor(tmp_path):
@@ -159,3 +159,14 @@ def test_wrong_schema_db_is_reported_not_touched(tmp_path):
     [info] = snap["databases"]
     assert info["ok"] is False and "missing tables" in info["error"]
     assert snap["negotiations"] == [] and _digest(bad) == before
+
+
+def test_crafted_negotiation_keys_are_not_found_rather_than_crashing(tmp_path):
+    """Continuation review: "²" passes str.isdigit() but not int(); a 20-digit id overflows SQLite."""
+    _db(tmp_path / "pilot.db", "pilot", {"baseline_v1": [dict(seed=1, outcome="agreed")]})
+    store = D.Store(tmp_path)
+    [row] = store.snapshot()["negotiations"]
+    name = row["key"].split(":")[0]
+    assert store.negotiation(row["key"]) is not None
+    for ident in ("²", "99999999999999999999", "١"):
+        assert store.negotiation(f"{name}:{ident}") is None

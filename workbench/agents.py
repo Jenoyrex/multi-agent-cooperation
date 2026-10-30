@@ -173,6 +173,13 @@ KINDS = {k.id: k for k in (
          (Param("url", "Endpoint URL", "text", "http://127.0.0.1:8001/turn", "A loopback http:// URL. No token is stored."),
           Param("timeout_s", "Timeout per turn (s)", "number", 10, "Seconds to wait for each answer.", 1, 60)),
          True, reads_instructions=True, deterministic=False, build=_http_build, check=_http_check),  # each request carries the condition's instructions
+    Kind("python_upload", "Uploaded Python agent", "upload",
+         "Your own Python file, inspected by reading its syntax tree (workbench/inspect_agent.py). It is never imported "
+         "or executed: this server has no isolated sandbox for untrusted code.",
+         (Param("class_name", "Agent class", "text", "", "The class in your file that implements generate_response."),),
+         False, "Inspected, not executed: this server has no isolated sandbox for uploaded Python. To run your agent, "
+                "serve it yourself on this machine and add it as a Local HTTP agent (see lab/example_http_agent.py).",
+         reads_instructions=False, deterministic=False),
     Kind("claude", "Claude (Anthropic)", "provider", "Provider adapter: src.agents.claude_agent.ClaudeAgent with the approved runtime.",
          (_model("ClaudeAgent"),), False, LOCKED, reads_instructions=True, deterministic=False, cost="paid"),
     Kind("openai", "GPT (OpenAI)", "provider", "Provider adapter: src.agents.openai_agent.OpenAIAgent with the approved runtime.",
@@ -194,7 +201,7 @@ def validate(doc) -> dict:
     name = str(doc.get("name", "")).strip()
     if not 1 <= len(name) <= NAME_MAX:
         raise WorkbenchError(f"Give the agent a name of 1 to {NAME_MAX} characters.", "name")
-    kind = KINDS.get(doc.get("kind"))
+    kind = KINDS.get(doc.get("kind")) if isinstance(doc.get("kind"), str) else None
     if kind is None:
         raise WorkbenchError(f"Choose an agent type: {', '.join(KINDS)}.", "kind")
     notes = str(doc.get("notes") or "").strip()
@@ -226,7 +233,18 @@ def validate(doc) -> dict:
         params[p.name] = v
     if kind.check:
         kind.check(params)
-    return {"name": name, "kind": kind.id, "params": params, "notes": notes}
+    clean = {"name": name, "kind": kind.id, "params": params, "notes": notes}
+    if kind.id == "python_upload":  # the server re-inspects the file; a client-side report is never trusted
+        from workbench.inspect_agent import inspect_source
+        up = doc.get("upload")
+        if not isinstance(up, dict):
+            raise WorkbenchError("Upload the agent's .py file.", "upload")
+        report = inspect_source(up.get("filename"), up.get("source"))
+        if params["class_name"] not in report["compatible_classes"]:
+            found = ", ".join(report["compatible_classes"]) or "none"
+            raise WorkbenchError(f"“{params['class_name']}” is not a compatible class in this file (compatible: {found}).", "params.class_name")
+        clean["upload"] = {"source": up["source"], **{k: report[k] for k in ("filename", "sha256", "bytes", "lines", "status", "issues", "classes", "imports")}}
+    return clean
 
 
 def build(defn: dict, display_name: str, variant: str) -> Agent:

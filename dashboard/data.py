@@ -27,6 +27,7 @@ from dashboard import demo
 from src.agents.prompting import BASELINE_VARIANT, STRUCTURED_V1_BLOCK, SYSTEM_INSTRUCTIONS
 from src.environment.allocation import compute_utility
 from src.evaluation import metrics as M
+from src.evaluation import inference
 from src.experiments import provenance
 from src.experiments.config import (APPROVED_CLAUDE_THINKING, APPROVED_MAX_ROUNDS,
                                     APPROVED_MAX_TRANSPORT_RERUNS, APPROVED_OPERATIONAL,
@@ -194,12 +195,30 @@ def paired_differences(rows: list[dict]) -> list[dict]:
     return out
 
 
+# The one model pairing of the full run (§8.3, §8.15), as agents record their names ("claude:<model>").
+APPROVED_PAIRING = (f"claude:{APPROVED_SCIENTIFIC['ClaudeAgent']['model']}",
+                    f"openai:{APPROVED_SCIENTIFIC['OpenAIAgent']['model']}")
+
+
+def full_design_complete(rows: list[dict]) -> bool:
+    """Exactly the preregistered full run (§8.3): every cell seed 40000-40059 x condition x
+    Claude seat x first mover once, 480 negotiations, all between the approved Claude and GPT
+    snapshots (§8.15) with the approved round limit. Missing, duplicated or foreign cells (including
+    rows without a Claude seat), any other model id or round limit do not count as complete."""
+    cells = Counter((r["seed"], r["condition"], r["claude_seat"], r["first_mover"]) for r in rows)
+    want = {(s, c, seat, fm) for s in range(FULL_RUN_SEEDS[0], FULL_RUN_SEEDS[1] + 1)
+            for c in (BASELINE_VARIANT, "structured_v1") for seat in "AB" for fm in "AB"}
+    pairings = {(r["model_A"], r["model_B"]) if r["claude_seat"] == "A" else (r["model_B"], r["model_A"]) for r in rows}
+    approved = pairings == {APPROVED_PAIRING} and all(r["max_rounds"] == APPROVED_MAX_ROUNDS for r in rows)
+    return len(rows) == FULL_RUN_TOTAL and set(cells) == want and set(cells.values()) == {1} and approved
+
+
 def dataset_view(rows: list[dict], records: list[NegotiationRecord], mode: str) -> dict:
     """Results for one dataset (pilot or full), respecting the §8.9 lock."""
     target = PILOT_TOTAL if mode == "pilot" else FULL_RUN_TOTAL
     view = {"mode": mode, "n": len(rows), "target": target, "locked": False, "by_condition": {},
             "paired": [], "pooled": aggregate(rows, records)}
-    if mode == "full" and len(rows) < FULL_RUN_TOTAL:
+    if mode == "full" and not full_design_complete(rows):
         # Not even pooled outcomes: only progress is shown before completion.
         view.update(locked=True, pooled=None)
         return view
@@ -207,6 +226,8 @@ def dataset_view(rows: list[dict], records: list[NegotiationRecord], mode: str) 
         idx = [i for i, r in enumerate(rows) if r["condition"] == c]
         view["by_condition"][c] = aggregate([rows[i] for i in idx], [records[i] for i in idx])
     view["paired"] = paired_differences(rows)
+    if mode == "full":  # §8.9: inference only on the complete confirmatory dataset; the pilot is never tested
+        view["inference"] = inference.analyse_cached(rows)
     return view
 
 
@@ -318,7 +339,9 @@ class Store:
             "results": results,
             "progress": {
                 "pilot": {"done": counts["pilot"], "target": PILOT_TOTAL},
-                "full": {"done": counts["full"], "target": FULL_RUN_TOTAL},
+                # The UI's "complete" comes from the design check, never from the row count alone.
+                "full": {"done": counts["full"], "target": FULL_RUN_TOTAL,
+                         "design_complete": full_design_complete([r for r in rows if r["mode"] == "full"])},
                 "other": {m: n for m, n in counts.items() if m not in ("pilot", "full")},
                 "aborted_attempts": len(aborted),
                 "last_run": max(runs, key=lambda r: r["started_at"])["run_id"] if runs else None,
@@ -329,7 +352,7 @@ class Store:
     def negotiation(self, key: str) -> Optional[dict]:
         name, _, ident = key.partition(":")
         db = next((d for d in self._dbs() if d["name"] == name and d["ok"]), None)
-        if db is None or not ident.isdigit():
+        if db is None or not (ident.isascii() and ident.isdigit() and len(ident) <= 18):  # "²" or a 20-digit id would raise
             return None
         conn = open_readonly(Path(db["path"]))
         try:
@@ -401,8 +424,8 @@ def setup() -> dict:
         "full": {"seeds": list(FULL_RUN_SEEDS), "instances": FULL_RUN_INSTANCES,
                  "total": FULL_RUN_TOTAL, "source": "docs/spec.md §8.3 (no full-run driver in code yet)",
                  "driver_implemented": False},
-        # The §8.9 tests (permutation, bootstrap, Holm) are not in code yet. Flip when they are,
-        # so the dashboard never implies the analysis is ready to run.
-        "analysis_implemented": False,
+        # The §8.9 tests live in src/evaluation/inference.py; they run only on the complete
+        # full-run dataset (dataset_view), never on the pilot or a partial run.
+        "analysis_implemented": True,
     }
 

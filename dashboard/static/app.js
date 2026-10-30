@@ -1,12 +1,13 @@
-import { CONDITIONS, esc, filterRows, fmt, labStages, mean, modelLabel, OUTCOME_LABEL, OUTCOMES, outcomeShares, pct, phase, refusalMessage, registerSlots, retryAfterSeconds, short, signed, timeAgo, uniq } from "./lib.js";
+import { CONDITIONS, esc, filterRows, fmt, fullComplete, labStages, mean, modelLabel, OUTCOME_LABEL, OUTCOMES, outcomeShares, pct, phase, refusalMessage, registerSlots, retryAfterSeconds, short, signed, timeAgo, uniq } from "./lib.js";
 import { dataTable, dotPlot, figure, histogram, legend, stackBars } from "./charts.js";
 import { createField } from "./field.js";
+import { createInsights } from "./insights.js";
 import { createWorkbench } from "./workbench.js";
 
 // Motion's vanilla build (vendor/motion.js, loaded as a classic script) exposes window.Motion.
 // Everything below degrades to the static page if it is missing or motion is reduced.
 const M = window.Motion;
-const reducedMotion = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
+const reducedMotion = () => document.documentElement.dataset.motion === "reduce" || matchMedia("(prefers-reduced-motion: reduce)").matches;
 const motionOn = () => Boolean(M) && !reducedMotion() && !document.hidden;
 const EASE = [0.16, 1, 0.3, 1]; // exponential ease-out, no overshoot
 const field = createField(document.getElementById("field"));
@@ -70,11 +71,11 @@ async function load() {
 }
 
 // ------------------------------------------------------------------ router
-const routes = { "": home, try: tryit, live: liveView, result: resultView, compare, lab: labView, example,
+const routes = { study: home, try: tryit, live: liveView, result: resultView, compare, lab: labView, example,
   experiments, negotiation: detail, results, structured: comparison, methodology, configuration: setup };
 // Which navigation entry a route belongs to.
-const NAV_OF = { "": "home", example: "home", live: "try", result: "try", negotiation: "experiments", structured: "results" };
-const notFound = () => `${head("Page not found", `There is no page at <code>${esc(location.hash)}</code> in this lab.`)}<a class="cta" href="#/">Go to Home${icon("chev-r")}</a>`;
+const NAV_OF = { "": "start", example: "study", live: "try", result: "try", negotiation: "experiments", structured: "results" };
+const notFound = () => `${head("Page not found", `There is no page at <code>${esc(location.hash)}</code> in this lab.`)}<a class="cta" href="#/">Go to Start${icon("chev-r")}</a>`;
 function parse() {
   const [, name = "", ...rest] = location.hash.replace(/^#/, "").split("/");
   return { name, arg: decodeURIComponent(rest.join("/")) };
@@ -86,12 +87,13 @@ async function render(animate = true) {
   document.querySelectorAll(".rail nav a").forEach((a) => (a.dataset.route === navKey ? a.setAttribute("aria-current", "page") : a.removeAttribute("aria-current")));
   figN = 0;
   cleanups.forEach((f) => f()); cleanups = [];
-  field.page(name === "" ? "overview" : ["live", "result", "negotiation"].includes(name) ? "negotiation" : name);
+  field.page(name === "study" ? "overview" : ["live", "result", "negotiation"].includes(name) ? "negotiation" : name);
   if (name === "negotiation") { main.innerHTML = skeleton(); field.loading(true); }
-  const html = await view(st.snap, arg);
+  // The public demo says so on every page: shared, temporary, rule-based agents only.
+  const html = (st.demo ? DEMO_BAR : "") + await view(st.snap, arg);
   field.loading(false);
   const swap = () => { main.innerHTML = html; wire(name); animateView(name); };
-  if (animate && document.startViewTransition && !document.hidden && !matchMedia("(prefers-reduced-motion: reduce)").matches) {
+  if (animate && document.startViewTransition && !document.hidden && !reducedMotion()) {
     const t = document.startViewTransition(swap);
     t.ready.catch(() => {}); // aborted transitions still run swap
   } else swap();
@@ -125,10 +127,12 @@ function statusLine(s) {
 /** The step that follows this page on the first-visit route. */
 const next = (href, label, why) => `<nav class="next" aria-label="Next step"><a href="${href}">Next: ${esc(label)}${icon("chev-r")}</a><span>${why}</span></nav>`;
 // Workbench pages (dashboard/static/workbench.js) share this file's helpers, router and motion.
-const wb = createWorkbench({ main, h: { icon, head, blockHead, notice, readout }, render: (animate) => render(animate),
-  onCleanup: (fn) => cleanups.push(fn), motion: { M, on: motionOn, EASE } });
-Object.assign(routes, wb.routes);
-Object.assign(NAV_OF, wb.nav);
+const shellH = { icon, head, blockHead, notice, readout, animateCharts: (root) => animateCharts(root) };
+const wb = createWorkbench({ main, h: shellH, render: (animate) => render(animate), onCleanup: (fn) => cleanups.push(fn), motion: { M, on: motionOn, EASE } });
+const ins = createInsights({ main, h: shellH, render: (animate) => render(animate), wb: wb.shared, prefs: createPrefs() });
+Object.assign(routes, wb.routes, ins.routes, { workbench: () => { location.replace("#/"); return ""; } });
+Object.assign(NAV_OF, wb.nav, ins.nav);
+const DEMO_BAR = `<p class="demobar noprint">${icon("info")}<span><b>Public demo.</b> A shared presentation server: everything here is visible to all visitors and erased on restart. Agents are rule-based; no AI model is ever called. <a href="#/settings">Details</a></span></p>`;
 const pilotNotice = notice("info", "info", "<b>Operational pilot (spec §8.4).</b> Three instances across the eight design cells. Pilot negotiations are excluded from the confirmatory dataset, so treat these values as checks on the harness, not findings.");
 
 function register(rows, seeds, kind) {
@@ -148,7 +152,7 @@ function labStatus(s, compact = false, headline = null) {
   const FULL = { locked: ["await", "Not started"], running: ["ready", `Running, ${full.done} of ${full.target}`], partial: ["lock", `${full.done} of ${full.target} recorded`], complete: ["check", "Complete, results unsealed"] }[g.full];
   // Readiness comes from the setup flags, so nothing implies code that does not exist yet.
   const ANALYSIS = !c.analysis_implemented ? ["await", "Not written yet"]
-    : { awaiting: ["await", "Waiting for data"], sealed: ["lock", "Sealed until the full run completes"], pending: ["info", "Ready to run, not run yet"] }[g.analysis];
+    : { awaiting: ["await", "Waiting for data"], sealed: ["lock", "Sealed until the full run completes"], pending: ["check", "Computed from the complete dataset"] }[g.analysis];
   const top = headline ?? { title: g.empty ? "Ready, not run yet" : p.label, lead: g.empty ? `The lab is ready, but the controlled experiment has not been executed yet: 0 of ${pilot.target} pilot and 0 of ${full.target} full-run negotiations recorded. This is the expected state before the first run, not an error. There are no results and no conclusions yet.` : `${pilot.done} of ${pilot.target} pilot and ${full.done} of ${full.target} full-run negotiations recorded.` };
   return `<div class="lab${compact ? " compact" : ""}">
     <div class="lab-head"><div><h2>${esc(top.title)}</h2>
@@ -977,7 +981,7 @@ function example(s) {
   // Stays on screen while the walkthrough scrolls, so no single turn can be read out of context as a real transcript.
   const pinned = `<div class="ex-banner pinned" role="note">${icon("alert")}<span><b>Illustrative walkthrough</b> · Illustrative example — not experimental data</span></div>`;
   const recorded = s.negotiations.find((r) => r.outcome === "agreed") ?? s.negotiations[0];
-  return `<a class="back" href="#/">${icon("chev-l")}Home</a>
+  return `<a class="back" href="#/study">${icon("chev-l")}Research study</a>
   ${head("How a negotiation works", "A short demonstration with made-up numbers that follows the real rules, so you can see how private values, offers and the final split fit together. It is not a model transcript: every message below was written for this example. Recorded negotiations use exactly this layout.")}
   ${recorded ? notice("info", "info", `<b>Research negotiations have been recorded.</b> <a href="#/negotiation/${encodeURIComponent(recorded.key)}">Open a recorded one</a>, or browse them all under <a href="#/experiments">Experiments</a>.`) : ""}
   <div class="example" aria-label="Illustrative example, not experimental data">
@@ -1202,18 +1206,23 @@ function verdictRow(n, i) {
 /** Why a dataset has nothing to show yet, or null when it can be shown. Never repeats the status panel. */
 function blocked(s, ds, after) {
   const v = s.results[ds];
-  if (v.locked) return `${notice("", "lock", `<b>Sealed until the full experiment is complete (${v.n} of ${v.target}).</b> Spec §8.9: outcomes are not compared by condition before all ${v.target} full-run negotiations are stored, and the sample size never depends on an observed result.`)}${after}`;
+  if (v.locked) return `${notice("", "lock", `<b>${v.n >= v.target ? `Sealed: ${esc(designGap(s.progress.full))}.` : `Sealed until the full experiment is complete (${v.n} of ${v.target}).`}</b> Spec §8.9: outcomes are not compared by condition before all ${v.target} full-run negotiations are stored, and the sample size never depends on an observed result.`)}${after}`;
   if (!v.n) return `${notice("", "await", ds === "pilot"
     ? `<b>No pilot negotiations recorded yet, so there is nothing to show.</b> When the pilot runs, its values appear here labelled as pilot: checks on the software, never findings. Nothing is estimated or simulated in the meantime. <a href="#/experiments">See the status</a>.`
     : `<b>No full-experiment negotiations recorded yet.</b> Confirmatory results come only from the full experiment (${v.target} negotiations), and conditions are not compared until all of it exists (spec §8.9). <a href="#/experiments">See the status</a>.`)}${after}`;
   return null;
 }
+/** Why a full run with enough rows is still not complete (the server's design check failed). */
+const designGap = (full) => `${full.done} full-run negotiations are recorded, but not every preregistered cell (seed × condition × Claude seat × first mover) exactly once`;
+
 /** "Can this answer the research question yet?", from recorded data and the setup flags only. */
 function answerPanel(s) {
-  const { pilot, full } = s.progress, complete = full.done >= full.target, tests = s.setup.analysis_implemented;
-  const state = !pilot.done && !full.done ? "Not ready — no experimental data" : !complete ? "Not ready — full experiment incomplete" : "Not ready — analysis not run";
+  const { pilot, full } = s.progress, complete = fullComplete(full), tests = s.setup.analysis_implemented;
+  const ran = Boolean(s.results?.full?.inference);
+  const state = !pilot.done && !full.done ? "Not ready — no experimental data" : !complete ? "Not ready — full experiment incomplete" : ran ? "Ready — preregistered tests computed" : "Not ready — analysis not run";
   const verdict = !pilot.done && !full.done ? "Not yet. No negotiations have been recorded."
-    : !complete ? `Not yet. The full experiment has ${full.done} of ${full.target} negotiations; anything below is descriptive.`
+    : !complete ? (full.done >= full.target ? `Not yet. ${designGap(full)}, so the data stays sealed.`
+      : `Not yet. The full experiment has ${full.done} of ${full.target} negotiations; anything below is descriptive.`)
     : !tests ? "Not yet. The data is complete, but the preregistered analysis has not been run."
     : `The data is complete. The preregistered tests belong on Structured vs baseline.`;
   return `<div class="answer panel"><h2>Can this answer the research question yet?</h2>
@@ -1221,7 +1230,7 @@ function answerPanel(s) {
     <dl class="readouts">
       ${readout("Pilot", `${pilot.done}<small> / ${pilot.target}</small>`, "operational check")}
       ${readout("Full experiment", `${full.done}<small> / ${full.target}</small>`, "research dataset")}
-      ${readout("Preregistered analysis", "Not yet", tests ? "written, not run (§8.9)" : "code not written yet (§8.9)")}
+      ${readout("Preregistered analysis", ran ? "Computed" : "Not yet", ran ? "see Structured vs baseline (§8.9)" : tests ? "runs on the complete full run only (§8.9)" : "code not written yet (§8.9)")}
       ${readout("Research conclusion", "Not yet", "appears on Structured vs baseline")}
     </dl>
     <p class="note" style="margin-top:12px">Pilot = operational check · Full experiment = research dataset · Analysis = statistical evaluation of the complete dataset.</p>
@@ -1230,10 +1239,10 @@ function answerPanel(s) {
 /** Where the answer to H1–H3 will appear. Status only: no test result exists in code. */
 function hypCards(s) {
   const { full } = s.progress, tests = s.setup.analysis_implemented;
-  const why = full.done < full.target ? `Sealed until all ${full.target} full-run negotiations are recorded (now ${full.done}).${tests ? "" : " The analysis code is not written yet."}`
+  const why = !fullComplete(full) ? (full.done >= full.target ? `Sealed: ${designGap(full)}.` : `Sealed until all ${full.target} full-run negotiations are recorded (now ${full.done}).${tests ? "" : " The analysis code is not written yet."}`)
     : tests ? "The data is complete; the preregistered analysis has not been run." : "The data is complete; the preregistered analysis code is not written yet.";
   return `<div class="hyp-cards">${HYP.map(([h, k, q]) => `<div class="panel"><span class="cite">${h} · ${esc(DEF[k].name)}${info(k)}</span><h3>${esc(q)}</h3>
-    <div class="state">${icon(full.done < full.target ? "lock" : "await")}Not tested yet</div><p class="note">${esc(why)}</p></div>`).join("")}</div>`;
+    <div class="state">${icon(!fullComplete(full) ? "lock" : "await")}Not tested yet</div><p class="note">${esc(why)}</p></div>`).join("")}</div>`;
 }
 const datasetBar = (ds) => `<div class="dsbar">${datasetSeg(ds)}<span class="note">${ds === "pilot" ? "<b>Pilot</b>: operational check, 24 negotiations, excluded from confirmatory analysis. Never findings." : "<b>Full experiment</b>: confirmatory dataset, 480 negotiations. The hypotheses are tested on this."}</span></div>`;
 function results(s) {
@@ -1310,16 +1319,17 @@ function comparison(s) {
   const rows = s.negotiations.filter((r) => r.mode === ds), by = v.by_condition, paired = v.paired;
   const narrow = innerWidth < 600; // short labels keep the plot area usable on phones
   const METRICS = [["rwe", "Δ RWE"], ["ew", narrow ? "Δ EW" : "Δ Egalitarian welfare"], ["agreement_rate", narrow ? "Δ Agreement" : "Δ Agreement rate"]];
-  const diffs = figure(nextFig(), "Paired differences per instance", `One dot per instance, n = ${paired.length}; the tick is mean d. Orange dots, right of the dashed zero line, scored higher under <code>structured_v1</code>; blue dots, left of it, higher under <code>baseline_v1</code>. No interval is drawn because the preregistered bootstrap has not been run.`,
+  const diffs = figure(nextFig(), "Paired differences per instance", `One dot per instance, n = ${paired.length}; the tick is mean d. Orange dots, right of the dashed zero line, scored higher under <code>structured_v1</code>; blue dots, left of it, higher under <code>baseline_v1</code>. ${v.inference ? "Intervals and tests are in the table below." : "No interval is drawn because the preregistered bootstrap runs only on the complete full-run dataset."}`,
     dotPlot(METRICS.map(([m, label]) => ({ label, color: "var(--ink-2)", mean: mean(paired.map((p) => p[m])), points: paired.map((p) => ({ v: p[m], color: p[m] > 0 ? "var(--struct)" : p[m] < 0 ? "var(--base)" : "var(--ink-2)", tip: `${label}, seed ${p.seed}: d = ${signed(p[m])}, ${p[m] > 0 ? "higher under structured_v1" : p[m] < 0 ? "higher under baseline_v1" : "no difference"} (${p.n_structured} structured, ${p.n_baseline} baseline)` })) })),
       { domain: [-1, 1], zero: true, bin: 0.04, ticks: 4, width: innerWidth < 600 ? 360 : 760, fmtTick: (x) => signed(x, 1), meanFmt: (x) => signed(x), axis: "d = structured − baseline" }), "",
     dataTable(["Instance seed", ...METRICS.map(([, l]) => l), "n structured", "n baseline"], paired.map((p) => [p.seed, ...METRICS.map(([m]) => signed(p[m])), p.n_structured, p.n_baseline])));
   const rate = (xs) => (xs.length ? pct(xs.filter((r) => r.outcome === "agreed").length / xs.length) : "—");
   const cellRate = (g, pred) => { const xs = g.filter(pred); return `${rate(xs)} <span class="sub">n = ${xs.length}</span>`; };
   return `${top}${ds === "pilot" ? pilotNotice : ""}
-  ${notice("warn", "alert", `<b>No inferential statistics.</b> The preregistered sign-flip permutation test, 95% bootstrap interval, Wilcoxon sensitivity check and Holm correction (§8.9) are ${s.setup.analysis_implemented ? "not run yet" : "not implemented yet"}, so no intervals or p-values are shown.`)}
-  <ul class="howto"><li><b>One dot is one instance</b> (one seed): its average under Structured minus its average under Baseline.</li><li><b>Right of the dashed zero line</b>, that instance scored higher under Structured; left of it, higher under Baseline.</li><li><b>No error bars</b>: the preregistered bootstrap interval has not been computed, so no difference here is a finding.</li></ul>
+  ${v.inference ? "" : notice("warn", "alert", `<b>No inferential statistics.</b> The preregistered sign-flip permutation test, 95% bootstrap interval, Wilcoxon sensitivity check and Holm correction (§8.9) ${s.setup.analysis_implemented ? "run only on the complete full-run dataset" : "are not implemented yet"}, so no intervals or p-values are shown.`)}
+  <ul class="howto"><li><b>One dot is one instance</b> (one seed): its average under Structured minus its average under Baseline.</li><li><b>Right of the dashed zero line</b>, that instance scored higher under Structured; left of it, higher under Baseline.</li><li>${v.inference ? "<b>Intervals and p-values</b> are in the Preregistered tests table below." : "<b>No error bars</b>: the preregistered bootstrap interval has not been computed, so no difference here is a finding."}</li></ul>
     ${paired.length ? `<div class="panel">${diffs}</div>` : notice("", "await", "<b>No paired instances yet.</b> An instance appears once it has negotiations stored under both conditions.")}</section>
+  ${v.inference ? inferenceBlock(v.inference) : ""}
   <section class="block">${blockHead("Secondary measures side by side", "Agreement-only and diagnostic rates. The three confirmatory measures per condition are on <a href=\"#/results\">Results</a>")}
     <div class="table-wrap"><table><thead><tr><th>Measure</th>${CONDITIONS.map((c) => `<th class="num">${cond(c)}</th>`).join("")}<th>Basis</th></tr></thead><tbody>
       ${[["Equitability", "equitability", fmt, "agreed"], ["Conditional SWE", "swe", fmt, "agreed"], ["Envy-free rate", "envy_free_rate", pct, "agreed"], ["Invalid-action rate", "invalid_action_rate", pct, "all"]]
@@ -1330,6 +1340,18 @@ function comparison(s) {
       ${CONDITIONS.map((c) => { const gr = rows.filter((r) => r.condition === c); return `<tr><td>${cond(c)}</td><td class="num">${cellRate(gr, (r) => r.claude_seat === "A")}</td><td class="num">${cellRate(gr, (r) => r.claude_seat === "B")}</td><td class="num">${cellRate(gr, (r) => r.first_mover === "A")}</td><td class="num">${cellRate(gr, (r) => r.first_mover === "B")}</td><td class="num">${signed(by[c]?.imbalance)} <span class="sub">n = ${by[c]?.n_imbalance ?? 0}</span></td></tr>`; }).join("")}
     </tbody></table></div></section>
   ${nxt}`;
+}
+
+/** The preregistered tests (spec §8.9, §8.11), shown only when the server computed them on the complete full run. */
+function inferenceBlock(inf) {
+  const p = (x) => (x == null ? "—" : x < 0.0001 ? "< 0.0001" : x.toFixed(4));
+  const rows = (res) => Object.entries(res).map(([h, r]) => `<tr><td>${h}</td><td>${esc(r.label)}</td><td class="num">${r.n_pairs}</td><td class="num">${r.mean_difference == null ? "—" : signed(r.mean_difference)}</td>
+    <td class="num">${r.bootstrap.defined ? `[${signed(r.bootstrap.low)}, ${signed(r.bootstrap.high)}]` : "—"}</td><td class="num">${p(r.permutation.p)}</td><td class="num">${p(r.permutation.p_holm)}</td>
+    <td>${!r.permutation.defined ? "Not testable" : r.permutation.reject ? "Significant (Holm)" : "Not significant (Holm)"}</td><td class="num">${r.wilcoxon.defined ? p(r.wilcoxon.p) : "—"}</td></tr>`).join("");
+  const table = (res, caption) => `<div class="table-wrap"><table><caption class="vh">${caption}</caption><thead><tr><th>Hypothesis</th><th>Measure</th><th class="num">Instances</th><th class="num">Mean d</th><th class="num">95% bootstrap CI</th><th class="num">Permutation p</th><th class="num">Holm p</th><th>Decision at α = ${inf.alpha}</th><th class="num">Wilcoxon p</th></tr></thead><tbody>${rows(res)}</tbody></table></div>`;
+  return `<section class="block">${blockHead("Preregistered tests", `Two-sided sign-flip permutation (${inf.permutations.toLocaleString()} flips), percentile bootstrap (${inf.bootstrap_resamples.toLocaleString()} resamples), Holm across H1–H3; Wilcoxon is a sensitivity check outside the corrected family. Seed ${inf.seed}.`)}
+    ${table(inf.primary, "Primary analysis")}
+    <h3 style="margin:22px 0 8px">Sensitivity: invalid actions removed (spec §8.11)</h3>${table(inf.invalid_action_sensitivity, "Invalid-action sensitivity analysis")}</section>`;
 }
 
 // ------------------------------------------------------------------ 7. methodology
@@ -1411,7 +1433,7 @@ function methodology(s) {
 function experiments(s) {
   const rows = s.negotiations, sci = s.setup.scientific, env = s.setup.environment;
   const claude = modelName(sci.ClaudeAgent.model), gpt = modelName(sci.OpenAIAgent.model);
-  return `${head("Experiments", "The controlled experiment behind the lab: the same kind of negotiation, run hundreds of times under a locked configuration. Has it run yet, and what was recorded?")}
+  return `${head("Data collection", "The controlled experiment behind the lab: the same kind of negotiation, run hundreds of times under a locked configuration. Has it run yet, and what was recorded?")}
   ${notice("", "lock", "<b>Research configuration is locked to preserve experimental validity.</b> Sandbox runs from Try it are never shown here and never count towards the research results.")}
   ${labStatus(s)}
   <section class="block" id="recorded">${blockHead("Recorded negotiations", rows.length ? "Each row is one negotiation of the controlled experiment; open it to replay it turn by turn" : "")}
@@ -1452,7 +1474,7 @@ function runRecords(s) {
   const cap = (mode) => s.runs.find((r) => r.mode === mode)?.config?.experiment?.budget_max_cost_usd ?? null;
   const tone = { completed: "good", running: "good", incomplete: "warn", budget_exhausted: "warn", failed: "crit" };
   const cur = s.provenance;
-  const { pilot, full } = s.progress, done = full.done >= full.target;
+  const { pilot, full } = s.progress, done = fullComplete(full);
   return `  <section class="block">${blockHead("What you can rely on right now")}
     <dl class="outcomes rely">
       <div><dt>Design, prompts and model settings</dt><dd><b>Frozen.</b> Fixed before the first pilot call. Every run is checked against them and records their versions.</dd></div>
@@ -1531,6 +1553,28 @@ function skeleton() {
     <div class="skel">${[0, 1, 2].map(() => `<div class="row"><i class="dot"></i><div class="lines"><i></i><i></i><i></i><i></i></div></div>`).join("")}</div>`;
 }
 
+/** Figures: axes are already drawn; marks materialise without overshoot as each chart scrolls in.
+ *  Each SVG animates once (a repainted panel brings new SVGs, which animate again). */
+function animateCharts(root, watch = (el, fn) => el && cleanups.push(M.inView(el, () => { fn(); }, { margin: "0px 0px 12% 0px", amount: 0 }))) {
+  if (!motionOn()) return;
+  const { animate, stagger } = M;
+  root.querySelectorAll("svg.viz").forEach((svg) => {
+    if (svg.dataset.animated) return;
+    svg.dataset.animated = "1";
+    const q = (k) => svg.querySelectorAll(`[data-anim="${k}"]`);
+    const dots = q("dot"), bars = q("bar"), cols = q("col"), means = q("mean"), zero = q("zero"), lines = q("line");
+    const paired = svg.closest("figure")?.querySelector("figcaption")?.textContent.includes("Paired");
+    watch(svg, () => {
+      if (zero.length) animate(zero, { opacity: [0, 1], transform: ["scaleY(0)", "scaleY(1)"] }, { duration: 0.5, ease: EASE });
+      if (lines.length) animate(lines, { opacity: [0, 1] }, { duration: 0.45, ease: EASE });
+      if (dots.length) animate(dots, { opacity: [0, 1], transform: ["scale(0.4)", "scale(1)"] }, { duration: 0.4, ease: EASE, delay: stagger(paired ? 0.09 : Math.min(0.015, 0.5 / dots.length), { startDelay: 0.08 }) });
+      if (bars.length) animate(bars, { transform: ["scaleX(0)", "scaleX(1)"] }, { duration: 0.55, ease: EASE, delay: stagger(Math.min(0.05, 0.4 / bars.length), { startDelay: 0.06 }) });
+      if (cols.length) animate(cols, { transform: ["scaleY(0)", "scaleY(1)"] }, { duration: 0.5, ease: EASE, delay: stagger(0.03, { startDelay: 0.06 }) });
+      if (means.length) animate(means, { opacity: [0, 1] }, { duration: 0.35, delay: 0.4 });
+    });
+  });
+}
+
 /** Entrances for the view just rendered. Nothing is pre-hidden: each entrance starts from its first keyframe
  *  just before the element scrolls in (inView with a margin below the viewport), so if a trigger never fires
  *  the content simply stays visible. */
@@ -1545,19 +1589,7 @@ function animateView(name) {
     watch(el, () => animate(el, { opacity: [0, 1], transform: ["translateY(14px)", "none"] }, { duration: 0.6, ease: EASE }));
   });
 
-  // Figures: axes are drawn first, then marks materialise without overshoot.
-  main.querySelectorAll("svg.viz").forEach((svg) => {
-    const dots = svg.querySelectorAll('[data-anim="dot"]'), bars = svg.querySelectorAll('[data-anim="bar"]'), cols = svg.querySelectorAll('[data-anim="col"]');
-    const means = svg.querySelectorAll('[data-anim="mean"]'), zero = svg.querySelectorAll('[data-anim="zero"]');
-    const paired = svg.closest("figure")?.querySelector("figcaption")?.textContent.includes("Paired");
-    watch(svg, () => {
-      if (zero.length) animate(zero, { opacity: [0, 1], transform: ["scaleY(0)", "scaleY(1)"] }, { duration: 0.6, ease: EASE });
-      if (dots.length) animate(dots, { opacity: [0, 1], transform: ["scale(0.4)", "scale(1)"] }, { duration: 0.45, ease: EASE, delay: stagger(paired ? 0.09 : Math.min(0.02, 0.8 / dots.length), { startDelay: 0.15 }) });
-      if (bars.length) animate(bars, { transform: ["scaleX(0)", "scaleX(1)"] }, { duration: 0.7, ease: EASE, delay: stagger(0.06, { startDelay: 0.1 }) });
-      if (cols.length) animate(cols, { transform: ["scaleY(0)", "scaleY(1)"] }, { duration: 0.6, ease: EASE, delay: stagger(0.04, { startDelay: 0.1 }) });
-      if (means.length) animate(means, { opacity: [0, 1] }, { duration: 0.4, delay: 0.55 });
-    });
-  });
+  animateCharts(main, watch);
 
   // Registers: recorded negotiations populate progressively (only cells that hold real data).
   main.querySelectorAll(".register").forEach((reg) => {
@@ -1566,7 +1598,7 @@ function animateView(name) {
     watch(reg, () => animate(on, { opacity: [0, 1], transform: ["scale(0.4)", "scale(1)"] }, { duration: 0.4, ease: EASE, delay: stagger(Math.min(0.012, 1.2 / on.length)) }));
   });
 
-  if (name === "") {
+  if (name === "study") {
     const hero = main.querySelector(".hero");
     // Scroll depth: the copy lifts and fades as the hero leaves.
     cleanups.push(scroll(animate(hero.querySelector(".hero-copy"), { transform: ["none", "translateY(-48px)"], opacity: [1, 0.35] }, { ease: "linear" }), { target: hero, offset: ["start start", "end start"] }));
@@ -1613,6 +1645,7 @@ function playTimeline() {
 // ------------------------------------------------------------------ wiring
 function wire(name) {
   wb.wire(name, parse().arg);
+  ins.wire(name, parse().arg);
   const media = main.querySelector(".hero-media");
   if (media) cleanups.push(heroVideo(media));
   main.querySelectorAll("[data-dataset]").forEach((b) => b.addEventListener("click", () => { st.dataset = b.dataset.dataset; render(); }));
@@ -1721,16 +1754,45 @@ document.addEventListener("pointerout", (e) => { if (e.target.closest("[data-tip
 document.addEventListener("focusin", (e) => { const el = e.target.closest?.("[data-tip]"); if (el) { const r = el.getBoundingClientRect(); showTip(el, r.right, r.top); } });
 document.addEventListener("focusout", (e) => { if (e.target.closest?.("[data-tip]")) tip.hidden = true; });
 
+// Interactive legends (viz.js toggleLegend): show or hide a series in the same figure.
+document.addEventListener("click", (e) => {
+  const b = e.target.closest(".ilegend button[data-series]");
+  if (!b) return;
+  const on = b.getAttribute("aria-pressed") !== "true";
+  b.setAttribute("aria-pressed", String(on));
+  b.closest("figure")?.querySelectorAll(`svg [data-s="${CSS.escape(b.dataset.series)}"]`).forEach((el) => el.classList.toggle("off", !on));
+});
+
 // On narrow screens the rail sticks to the top; pinned banners sit just below it.
 const rail = document.querySelector(".rail");
 new ResizeObserver(() => document.documentElement.style.setProperty("--rail-h", `${rail.offsetHeight}px`)).observe(rail);
 
-// theme
-document.getElementById("theme").addEventListener("click", () => {
-  const next = document.documentElement.dataset.theme === "light" ? "dark" : "light";
-  document.documentElement.dataset.theme = next;
-  try { localStorage.setItem("theme", next); } catch (e) { /* storage unavailable */ }
-});
+// ------------------------------------------------------------------ preferences: theme (system | light | dark) and motion (system | reduce)
+function createPrefs() {
+  const html = document.documentElement, dark = matchMedia("(prefers-color-scheme: dark)");
+  const read = (k, d) => { try { return localStorage.getItem(k) ?? d; } catch { return d; } };
+  const store = (k, v) => { try { localStorage.setItem(k, v); } catch { /* storage unavailable: the choice lasts this visit */ } };
+  const resolve = (t) => (t === "system" ? (dark.matches ? "dark" : "light") : t);
+  // The switch cross-fades (Apple: ease brightness changes); reduced motion swaps instantly.
+  const paint = (t) => {
+    const go = () => { html.dataset.theme = resolve(t); document.querySelector('meta[name="theme-color"]')?.setAttribute("content", resolve(t) === "dark" ? "#0b0b0d" : "#f5f5f7"); };
+    if (!document.startViewTransition || reducedMotion() || html.dataset.theme === resolve(t)) return go();
+    html.classList.add("theming");
+    document.startViewTransition(go).finished.finally(() => html.classList.remove("theming"));
+  };
+  dark.addEventListener("change", () => { if (read("theme", "system") === "system") paint("system"); });
+  const prefs = {
+    theme: () => read("theme", "system"),
+    motion: () => read("motion", "system"),
+    set(k, v) {
+      store(k, v);
+      if (k === "theme") paint(v);
+      if (k === "motion") { if (v === "reduce") html.dataset.motion = "reduce"; else delete html.dataset.motion; }
+    },
+  };
+  document.getElementById("theme").addEventListener("click", () => prefs.set("theme", html.dataset.theme === "dark" ? "light" : "dark"));
+  return prefs;
+}
 
 // boot + live refresh (re-render only when the stored data changed)
 const live = document.getElementById("live");
@@ -1751,7 +1813,7 @@ async function boot() {
       const changed = await load();
       live.classList.remove("stale", "tick"); void live.offsetWidth; live.classList.add("tick");
       const { name } = parse();
-      if (changed && !["negotiation", "try", "live", "result", "compare", ...wb.names].includes(name)) { const y = scrollY; await render(false); scrollTo(0, y); }
+      if (changed && !["", "negotiation", "try", "live", "result", "compare", ...wb.names, ...ins.names].includes(name)) { const y = scrollY; await render(false); scrollTo(0, y); }
     } catch { live.classList.add("stale"); }
   }, 10000);
 }

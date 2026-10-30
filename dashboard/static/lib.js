@@ -40,10 +40,13 @@ export function filterRows(rows, f = {}) {
 export const uniq = (rows, key) => [...new Set(rows.map((r) => r[key]).filter((v) => v !== null && v !== undefined))].sort();
 
 /** Experiment phase from recorded data only. */
+/** The full run is complete only when the server's design check says so (every preregistered cell once), never by row count. */
+export const fullComplete = (full) => full.design_complete === true;
+
 export function phase(snap) {
   const { pilot, full } = snap.progress;
   const running = snap.runs.some((r) => r.status === "running");
-  if (full.done >= full.target) return { key: "full-complete", label: "Full run complete", tone: "good" };
+  if (fullComplete(full)) return { key: "full-complete", label: "Full run complete", tone: "good" };
   if (full.done > 0 || snap.runs.some((r) => r.mode === "full")) return { key: "full", label: running ? "Full run in progress" : "Full run incomplete", tone: running ? "good" : "warn" };
   if (pilot.done >= pilot.target) return { key: "pilot-complete", label: "Pilot complete", tone: "good" };
   if (pilot.done > 0 || snap.runs.some((r) => r.mode === "pilot")) return { key: "pilot", label: running ? "Pilot in progress" : "Pilot incomplete", tone: running ? "good" : "warn" };
@@ -104,11 +107,11 @@ export function labStages(snap) {
   const running = (m) => snap.runs.some((r) => r.mode === m && r.status === "running");
   const stage = (p, m) => (p.done >= p.target ? "complete" : running(m) ? "running" : p.done > 0 ? "partial" : "ready");
   const pilotState = stage(pilot, "pilot");
-  const fullState = full.done >= full.target ? "complete" : full.done > 0 || running("full") ? (running("full") ? "running" : "partial") : "locked";
+  const fullState = fullComplete(full) ? "complete" : full.done > 0 || running("full") ? (running("full") ? "running" : "partial") : "locked";
   return {
     pilot: pilotState,
     full: fullState,
-    analysis: pilot.done + full.done === 0 ? "awaiting" : full.done >= full.target ? "pending" : "sealed",
+    analysis: pilot.done + full.done === 0 ? "awaiting" : fullComplete(full) ? "pending" : "sealed",
     empty: pilot.done + full.done === 0,
   };
 }
@@ -140,4 +143,89 @@ export function refusalMessage(status, body, retryAfter = null) {
     return `${said ?? "Too many runs were started recently."}${s ? ` You can start again in about ${s} s.` : ""}`;
   }
   return said ?? `The server refused the request (${status}).`;
+}
+
+// ------------------------------------------------------------------ workbench analytics (pure, from stored trials only)
+export const completedTrials = (trials) => (trials ?? []).filter((t) => t.status === "completed");
+
+/** Descriptive summary of negotiation records. Nothing is imputed: rates and means are null when n = 0. */
+export function summarize(trials) {
+  const done = completedTrials(trials), n = done.length;
+  const outcomes = Object.fromEntries(OUTCOMES.map((o) => [o, done.filter((t) => t.outcome === o).length]));
+  const rate = (o) => (n ? outcomes[o] / n : null);
+  return { n, excluded: (trials ?? []).length - n, outcomes, agreement_rate: rate("agreed"), walk_rate: rate("walked_away"),
+    timeout_rate: rate("timeout"), invalid_rate: rate("invalid_action"),
+    rwe: mean(done.map((t) => t.rwe)), ew: mean(done.map((t) => t.ew)), rounds: mean(done.map((t) => t.rounds)) };
+}
+
+/** Type-7 (linear) quantile of a sorted array, as numpy's default. */
+export function quantile(sorted, p) {
+  if (!sorted.length) return null;
+  const h = (sorted.length - 1) * p, lo = Math.floor(h);
+  return sorted[lo] + (h - lo) * ((sorted[lo + 1] ?? sorted[lo]) - sorted[lo]);
+}
+
+/** Box-plot statistics with Tukey whiskers (1.5 IQR); null for no values. */
+export function boxStats(values) {
+  const v = values.filter((x) => x !== null && x !== undefined && !Number.isNaN(x)).sort((a, b) => a - b);
+  if (!v.length) return null;
+  const q1 = quantile(v, 0.25), median = quantile(v, 0.5), q3 = quantile(v, 0.75), iqr = q3 - q1;
+  const inside = v.filter((x) => x >= q1 - 1.5 * iqr && x <= q3 + 1.5 * iqr);
+  return { n: v.length, min: v[0], max: v.at(-1), q1, median, q3, mean: mean(v), lo: inside[0], hi: inside.at(-1),
+    outliers: v.filter((x) => x < inside[0] || x > inside.at(-1)) };
+}
+
+/** Running outcome counts after each completed negotiation, in run order. */
+export function cumulativeOutcomes(trials) {
+  const run = Object.fromEntries(OUTCOMES.map((o) => [o, 0]));
+  return completedTrials(trials).sort((a, b) => a.index - b.index).map((t, i) => { run[t.outcome] += 1; return { k: i + 1, ...run }; });
+}
+
+/** Sankey links between consecutive stages: stages are functions trial -> node id. Counts only completed trials. */
+export function flows(trials, stages) {
+  const links = new Map();
+  for (const t of completedTrials(trials)) {
+    for (let i = 0; i + 1 < stages.length; i++) {
+      const key = `${i}\u0000${stages[i](t)}\u0000${stages[i + 1](t)}`;
+      links.set(key, (links.get(key) ?? 0) + 1);
+    }
+  }
+  return [...links].map(([key, n]) => { const [stage, from, to] = key.split("\u0000"); return { stage: +stage, from, to, n }; });
+}
+
+/** Count of each value, in first-seen order. */
+export const tally = (values) => values.reduce((m, v) => m.set(v, (m.get(v) ?? 0) + 1), new Map());
+
+/** Which onboarding steps are done, from real records only (built-ins do not count as the user's own). */
+export function journey({ agents = [], environments = [], simulations = [] }) {
+  const done = simulations.filter((s) => s.status === "completed" && s.done > 0);
+  return { agents: agents.some((a) => !a.builtin), resources: environments.some((e) => !e.builtin),
+    experiment: simulations.length > 0, analysis: done.length > 0 };
+}
+
+/** Scale non-negative numbers to whole numbers summing to exactly 100 (largest remainder; equal split when all are 0). */
+export function normalize100(values) {
+  const v = values.map((x) => (Number.isFinite(x) && x > 0 ? x : 0)), total = v.reduce((a, b) => a + b, 0);
+  const raw = total ? v.map((x) => (x * 100) / total) : v.map(() => 100 / v.length);
+  const out = raw.map(Math.floor);
+  const order = raw.map((x, i) => [x - Math.floor(x), i]).sort((a, b) => b[0] - a[0] || a[1] - b[1]);
+  const deficit = 100 - out.reduce((a, b) => a + b, 0);
+  for (let k = 0; k < deficit; k++) out[order[k % order.length][1]] += 1;
+  return out;
+}
+
+/** Moves recorded in negotiation transcripts. An offer is "rejected" when the other agent answers it with a
+ *  counter-offer or by walking away; an offer still standing when a negotiation ends is neither. */
+export function actionCounts(trials) {
+  const c = { offers: 0, accepted: 0, rejected: 0, walkaways: 0, invalid: 0 };
+  for (const t of completedTrials(trials)) {
+    (t.events ?? []).forEach((e, i, all) => {
+      const next = all[i + 1];
+      if (e.action === "OFFER") { c.offers += 1; if (next && next.actor !== e.actor && ["OFFER", "WALK_AWAY"].includes(next.action)) c.rejected += 1; }
+      else if (e.action === "ACCEPT") c.accepted += 1;
+      else if (e.action === "WALK_AWAY") c.walkaways += 1;
+      else if (e.action === "INVALID") c.invalid += 1;
+    });
+  }
+  return c;
 }

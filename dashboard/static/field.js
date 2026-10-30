@@ -20,7 +20,7 @@ export function createField(canvas) {
     tweens[key] = M.animate(P[key], to, { duration: 1.2, ease: [0.16, 1, 0.3, 1], ...opts, onUpdate: (v) => { P[key] = v; } });
   };
 
-  let W = 0, H = 0, dpr = 1, parts = [], ink = "237,241,243", running = false, last = 0, star = null, starTimer = 0;
+  let quiet = true, W = 0, H = 0, dpr = 1, parts = [], ink = "237,241,243", running = false, last = 0, star = null, starTimer = 0;
 
   function readInk() {
     const hex = getComputedStyle(document.documentElement).getPropertyValue("--ink").trim().replace("#", "");
@@ -34,7 +34,7 @@ export function createField(canvas) {
     const n = Math.min(90, Math.max(28, Math.round((W * H) / 20000)));
     while (parts.length < n) parts.push(spawn());
     parts.length = n;
-    if (!running) draw(0);
+    if (!running && !quiet) draw(0);
   }
   function spawn() {
     const z = 0.25 + Math.random() * 0.75; // depth: far (small, dim, slow) to near
@@ -88,7 +88,7 @@ export function createField(canvas) {
     requestAnimationFrame(loop);
   }
   function start() {
-    if (running || reduced() || document.hidden) return;
+    if (quiet || running || reduced() || document.hidden) return;
     running = true; last = 0; requestAnimationFrame(loop); scheduleStar();
   }
   function stop() { running = false; clearTimeout(starTimer); }
@@ -107,8 +107,8 @@ export function createField(canvas) {
   readInk(); resize();
   addEventListener("resize", resize);
   document.addEventListener("visibilitychange", () => (document.hidden ? stop() : start()));
-  new MutationObserver(() => { readInk(); if (!running) draw(0); }).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
-  matchMedia("(prefers-reduced-motion: reduce)").addEventListener("change", () => (reduced() ? (stop(), draw(0)) : start()));
+  new MutationObserver(() => { readInk(); if (!running && !quiet) draw(0); }).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+  matchMedia("(prefers-reduced-motion: reduce)").addEventListener("change", () => (reduced() ? (stop(), quiet || draw(0)) : start()));
   start();
 
   let base = "idle", loading = false;
@@ -116,7 +116,11 @@ export function createField(canvas) {
   return {
     /** Page context: on the Overview the hero video is the moving layer, so the field recedes there. */
     page(name) {
-      tween("strength", name === "overview" ? 0.3 : name === "negotiation" ? 0.7 : 0.5, { duration: 0.8 });
+      // Only the research replay uses the field (it shows whose turn it is); everywhere else it stays still and empty.
+      quiet = name !== "negotiation";
+      if (quiet) { stop(); ctx.clearRect(0, 0, canvas.width, canvas.height); return; }
+      start();
+      tween("strength", 0.7, { duration: 0.8 });
       if (name !== "negotiation") { tween("flow", 0); tween("converge", 0); tween("gap", 0); }
     },
     /** Experiment state from the run records: idle | running | complete. */

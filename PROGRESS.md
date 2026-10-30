@@ -383,3 +383,88 @@ Non-blocking notes and how they were handled:
   regression tests; the reviewer was not re-run.
 - **Verification:** `pytest` **526 passed**; `node --test` **13 passed**; offline simulation hashes unchanged; frozen files unchanged since `1de0b27`; no provider call, no network beyond 127.0.0.1.
 - **Remaining:** responses to scarcity not analysed; no inferential tests; bilateral protocol only; phone layout not visually verified; Impeccable update (v4.8.0) not applied.
+
+---
+
+## Research-quality pass (2026-10-28, uncommitted by instruction)
+
+- **G2 analysis:** `src/evaluation/inference.py`, pure Python, implementing spec §8.9 and §8.11: instance-level paired d, sign-flip permutation (10k),
+  percentile bootstrap (10k), Wilcoxon sensitivity check (exact when untied and n ≤ 50, otherwise tie-corrected normal), Holm across H1–H3, and the invalid-action
+  sensitivity analysis. Open details fixed before any full-run data: `ANALYSIS_SEED = 20260921`, type-7 percentiles.
+  Wired into the research dashboard only for the exact complete full run (`full_design_complete`; review B1) and into `scripts/run_analysis.py` (refuses otherwise).
+  `tests/test_inference.py` (22): known-answer synthetic datasets, hand-computed toy values, scipy as a test-only Wilcoxon oracle, the Holm reversal,
+  nested repeats, and the dashboard lock.
+- **G3 behaviour:** `workbench/analytics.py`: scarcity response (quantity terciles plus Spearman, with a per-unit value confound caveat), concession curve,
+  value split, position (opener/responder, seat), per-condition agent measures, and exploratory inference (a fixed environment = one instance).
+  Fixed misleading wording found by running the demo: uniform claims are now named as uniform; alignment separates strict wins from ties.
+  `tests/test_workbench_analytics.py` (9).
+- **G4 review (fresh, read-only):** the original HTTP-instructions defect is confirmed fixed with nothing related left wrong; no custom prompt reaches any agent.
+  Blocking B1 (dashboard lock counted rows rather than checking the design) and B2 (stale "not run" text beside the tests table) are fixed with tests. Also fixed: CSV `\t`/`\r` neutralising,
+  scarcity confound caveat, alignment wording, interpretation wording at d = 0, "Receives instructions" column.
+- **G5 browser:** real narrow viewport via a same-origin popup. Chrome's minimum gave a 451 CSS px layout, **not 390 px**. All 10 Workbench routes and all 5
+  simulation tabs (including the new sections and an expanded transcript) have no page-level horizontal overflow; 7 wide tables scroll inside their wrappers.
+  Fixed: back link 22 → 24 px target; row focus outline inset. Desktop dark and light checked. Keyboard Enter expands transcripts and keeps focus. Reduced motion is
+  covered by the global rule and the motion checks. Found and stopped 2 stale dev-server processes that had been answering on the same port.
+- **G6 demo:** `scripts/run_workbench_demo.py`, 80 simulated negotiations end to end through the validated API; output in `sandbox_runs/workbench_demo/`.
+- **G7:** `pytest` **571 passed**; `node --test` **13 passed**; `node --check` all 5 static JS files ok; offline simulation byte-identical to committed artifacts;
+  demo run twice with 6 deterministic files identical; frozen files unchanged; no secrets; no network-capable imports; nothing committed or pushed.
+
+---
+
+## Continuation: review, fixes, 390 px verification (2026-10-29, uncommitted by instruction)
+
+- **Correction to the entry above:** "B1 ... fixed" was not true. `full_design_complete` only counted rows (480, 8 per seed), so 480 baseline-only rows or a duplicated cell unlocked the §8.9 tests. It now requires every seed × condition × Claude seat × first mover cell exactly once, and one fixed Claude-vs-GPT model pairing. `scripts/run_analysis.py` and the dashboard both use it. The UI's "complete" now comes from the server flag `progress.full.design_complete`, never from the row count.
+- **Fresh read-only review (subagent), 3 passes.** Fixed with regression tests (each mutation-checked: reverting the fix fails its test):
+  - Cancel during the last planned negotiation was recorded as `completed`.
+  - Wrong JSON types (list ids, `agents` not an object, non-string condition/pace/kind) gave 500 instead of 400.
+  - A crafted `/api/negotiation` key (`²`, a 20-digit id) dropped the connection; `do_GET` now always answers, with the security headers.
+  - The CSV helper turned `""` into `'`.
+  - The workbench cancel route skipped the public-demo read-only check.
+  - Provenance always recorded `zero_cost_mode: true`.
+  - Per-condition concession had no n (now computed and shown).
+  - Exploratory inference (~1.7 s) reran on every 400 ms poll: it is memoised (`inference.analyse_cached`) and skipped while a simulation runs.
+  - The HTTP-instructions regression test now checks behaviour: the observation equals `system_instructions(view, condition)` exactly, and notes and name never appear.
+- **390 px:** a genuine 390 CSS px layout viewport via headless Chrome and the DevTools protocol (innerWidth = clientWidth = visualViewport = 390; `(max-width: 390px)` matches). No page-level overflow on 38 Workbench states (light and dark) or 12 research routes.
+  - Fixed: expanded transcripts ran off the scrolling table's edge (now sticky, capped to the visible width); evidence buttons were 17 px wide; swap toggles were 22 px tall.
+  - Keyboard: 40 tab stops, all with a visible focus ring. Reduced motion: 0 animated or transitioning elements.
+- **Verification:** see the final report for counts. Frozen files are unchanged versus HEAD. The demo was run twice: 6 deterministic files identical; `config.json`/`report.md` differ only in ids and timestamps. The offline simulation is byte-identical to the committed artifacts. No network, no installs, no spend, nothing committed.
+
+---
+
+## Final pre-commit review (2026-10-29, uncommitted by instruction)
+
+Read-only review of all 23 changed or new files. The statistics were re-checked independently:
+- **Sign-flip:** within Monte Carlo error of exact enumeration.
+- **Wilcoxon:** matches scipy (exact and tie-corrected normal).
+- **Bootstrap:** matches numpy's linear percentile.
+- **Holm:** matches a hand-worked example.
+- **Nesting and §8.11:** confirmed.
+
+Four defects were found and fixed. Each code fix has a regression test that fails when the fix is reverted. No frozen research file changed and the research design is unchanged.
+- **Confirmatory-analysis eligibility** (`full_design_complete`, `dashboard/data.py`) now also requires the approved §8.15 snapshots on every row (`claude:claude-sonnet-4-6` vs `openai:gpt-4.1-2025-04-14`) and `MAX_ROUNDS` = 10. Before, a complete design with other model ids or another round limit unlocked the tests. The runner already refuses those configurations; the gate now enforces them too.
+- **The demo** (`scripts/run_workbench_demo.py`) refuses to delete the Workbench's own database. Before, `--out sandbox_runs` would have unlinked `sandbox_runs/workbench.db`.
+- **Concession wording** (`workbench/analytics.py`) now says "raised what it asked for" when an agent hardened. Before, it said "lowered ... by -0.12".
+- **Documentation:** `docs/workbench.md` and `scripts/run_analysis.py` describe the complete-design gate accurately: every cell once, approved snapshots, `MAX_ROUNDS` 10.
+
+**Verification.** `pytest` 597 passed; `node --test` 14 passed; `node --check` ok on all static JS; `git diff --check` clean.
+- Demo run twice: 6 deterministic files byte-identical.
+- Offline simulation: byte-identical to the committed artifacts.
+- No secrets, network or provider imports, installs, or spending.
+
+**What this does and does not show.** Every test passed, but that validates software only.
+- **No empirical results:** no real-model pilot or full run exists, so H1–H3 remain untested and the research question unanswered.
+- **Synthetic runs are not evidence:** that includes the rule-based Workbench demo, the offline simulation and the synthetic analysis fixtures. They say nothing about Claude, GPT, Gemini or any commercial LLM.
+
+---
+
+## Platform UI/UX transformation (2026-10-30, uncommitted by instruction)
+
+Redesign of the whole dashboard into a guided multi-agent experimentation platform. Research protocol, frozen files, seeds, prompts, hypotheses, metrics and `results/` are untouched. No provider call, no paid API, no network beyond 127.0.0.1 (one exception, at build time: the OFL-licensed Inter font was downloaded once from jsDelivr and is now self-hosted).
+
+- **Skills used:** apple-design (typography, materials, motion, reduced motion), dataviz (form choice, palette re-validated on the new surfaces with its validator: all checks pass in light and dark), impeccable (context, craft floor, detector run once), claude-in-chrome (visual verification). Graphify was inspected and not used: it builds code knowledge graphs offline, not in-page charts. Impeccable's concept-roll was skipped because the brief pins the direction; PRODUCT.md records the brief.
+- **Design system:** new tokens (Apple-style neutrals, one accent, radii 8/12/16), Inter self-hosted (SF on Apple devices), light/dark/system themes with a cross-fade switch, manual reduce-motion, print styles. The decorative particle background now runs only on the research replay, where it encodes turns.
+- **Information architecture:** Workspace (Start, Agents, Resources, Experiments, Analytics, Reports), Playground (Try, Compare runs, Agent Lab), Research study (Overview moved to `#/study`, Data collection, Results, Methodology, Configuration), Settings.
+- **New functionality:** guided Start page from real records with a one-click sample experiment; three agent paths; **Python upload** (`workbench/inspect_agent.py`: `ast` only, never executed; `python_upload` kind is never runnable; upload routes accept 128 KB bodies, others keep 16 KB; starter template, tested against the engine); resource builder with units, categories, sliders, balance-to-100 and a who-values-what view (`meta` is labels only); five-step experiment wizard; live monitoring (counters, offers/rejections, outcome tape, transcript, stop); per-experiment analytics with 12 chart types, condition filter, click-to-filter, legend toggles and click-through to transcripts; pooled Analytics and two-experiment Compare (labelled exploratory); printable Reports with CSV/JSON/MD; Settings.
+- **Defects found and fixed in browser loops:** stale server on :8765 with an old CSP hash blocked the theme script (moved verification to :8770; the old process was left running); unwired legend toggles; overlapping scatter series (later series now rings); oversized text in wide charts; colliding line labels; a full-ring donut drawn as a bitten disc; new resource sets opening in an error state; fieldset grid and `max-content` summaries widening phones; legacy empty states laid out sideways; duplicated copy; a `normalize100` deficit loop (caught by its unit test).
+- **Verification:** `pytest` **617 passed** (597 + 20 new); `node --test` **20 passed** (14 + 6 new); `node --check` all static JS; `git diff --check` clean. Chrome: all 32 routes render with no JS errors; full journey run (upload compatible and rejected files, wizard, 24-negotiation live run, analytics interactions, report, exports, provider test that sends nothing). True 390 px viewport via the DevTools protocol: 30 routes and 3 experiment tabs × light and dark, no page overflow after fixes. Reduce motion: 0 animated elements.
+- **Limitations:** uploaded agents cannot run (no isolated sandbox; serve them as local HTTP agents instead); charts have no zoom; PDF is the browser's print-to-PDF; pooled analytics reads the newest 30 experiments; Inter is a stand-in for SF Pro off Apple devices (detector flags it as overused); Barlow font files remain on disk unused.

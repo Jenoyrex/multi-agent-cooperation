@@ -25,8 +25,8 @@ def _csv(header, rows) -> str:
     buf = io.StringIO()
     w = csv.writer(buf, lineterminator="\n")
     w.writerow(header)
-    # A leading = + - @ would make a spreadsheet evaluate a name as a formula.
-    w.writerows([["" if v is None else f"'{v}" if isinstance(v, str) and v[:1] in "=+-@" else v for v in r] for r in rows])
+    # A leading = + - @ (or tab / carriage return, per OWASP) would make a spreadsheet evaluate a name as a formula.
+    w.writerows([["" if v is None else f"'{v}" if isinstance(v, str) and v and v[0] in "=+-@\t\r" else v for v in r] for r in rows])
     return buf.getvalue()
 
 
@@ -70,6 +70,13 @@ def build(doc: dict, name: str) -> dict:
             "text/markdown" if name.endswith(".md") else "application/json", "content": body}
 
 
+def inference_md(inf: dict) -> str:
+    if not inf.get("available"):
+        return f"Not run: {inf.get('reason')}"
+    lines = [f"> {inf['scope']}", ""] + [f"- {h}: {text}" for h, text in inf["interpretations"].items()]
+    return "\n".join(lines)
+
+
 def report(doc: dict) -> str:
     cfg, a, p = doc["config"], analyse(doc), doc["provenance"]
     env = cfg["environment"]
@@ -98,6 +105,9 @@ def report(doc: dict) -> str:
 {conds}
 
 RWE and EW score failed negotiations as 0; SWE and equitability use agreed negotiations only.
+
+## Exploratory inference
+{inference_md(a['inference'])}
 
 ## Observations
 {obs}

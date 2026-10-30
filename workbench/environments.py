@@ -97,7 +97,36 @@ def validate(doc) -> dict:
         if sum(p.values()) != TOTAL_POINTS:
             raise WorkbenchError(f"Agent {seat}'s points add up to {sum(p.values())}; they must add up to exactly {TOTAL_POINTS}.", f"points.{seat}")
         points[seat] = {c: p[c] for c in resources}
-    return {**base, "source": "custom", "resources": resources, "points": points}
+    return {**base, "source": "custom", "resources": resources, "points": points, **_meta(doc.get("meta"), resources)}
+
+
+META_RE = re.compile(r"^[\w ./%-]{0,24}$")
+
+
+def _meta(raw, resources: dict) -> dict:
+    """Optional display labels per resource: a unit ("kg", "hours") and a group ("materials").
+    Labels only: the engine and every metric see the same pool and points without them."""
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise WorkbenchError("Resource details must be an object.", "meta")
+    out = {}
+    for c, m in raw.items():
+        c = str(c).strip().lower()
+        if c not in resources:
+            continue  # details for a resource that was removed are dropped, not an error
+        if not isinstance(m, dict):
+            raise WorkbenchError(f"Details for “{c}” must be an object.", f"meta.{c}")
+        entry = {}
+        for key, what in (("unit", "unit"), ("group", "category")):
+            v = str(m.get(key) or "").strip()
+            if not META_RE.match(v):
+                raise WorkbenchError(f"The {what} of “{c}”: at most 24 letters, digits, spaces or . / % -.", f"meta.{c}.{key}")
+            if v:
+                entry[key] = v
+        if entry:
+            out[c] = entry
+    return {"meta": out} if out else {}
 
 
 def parse_text(text: str) -> dict:
@@ -182,9 +211,11 @@ BUILTIN = {d["id"]: {**validate(d), "id": d["id"], "builtin": True} for d in (
     {"id": "builtin-field-hospital", "name": "Field hospital supplies", "max_rounds": 10, "first_mover": "A",
      "description": "Two relief teams split scarce supplies. Team A needs food and water most; team B needs medicine.",
      "resources": {"food": 20, "water": 12, "medicine": 6},
-     "points": {"A": {"food": 50, "water": 30, "medicine": 20}, "B": {"food": 10, "water": 30, "medicine": 60}}},
+     "points": {"A": {"food": 50, "water": 30, "medicine": 20}, "B": {"food": 10, "water": 30, "medicine": 60}},
+     "meta": {"food": {"unit": "crates", "group": "provisions"}, "water": {"unit": "tanks", "group": "provisions"}, "medicine": {"unit": "kits", "group": "medical"}}},
     {"id": "builtin-shared-lab", "name": "Shared lab time", "max_rounds": 8, "first_mover": "B",
      "description": "Two groups divide instrument hours with nearly identical priorities: little room for trade.",
      "resources": {"microscope": 10, "sequencer": 10, "cluster": 10},
-     "points": {"A": {"microscope": 40, "sequencer": 35, "cluster": 25}, "B": {"microscope": 40, "sequencer": 30, "cluster": 30}}},
+     "points": {"A": {"microscope": 40, "sequencer": 35, "cluster": 25}, "B": {"microscope": 40, "sequencer": 30, "cluster": 30}},
+     "meta": {"microscope": {"unit": "hours", "group": "instruments"}, "sequencer": {"unit": "hours", "group": "instruments"}, "cluster": {"unit": "node-hours", "group": "computing"}}},
 )}

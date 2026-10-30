@@ -1,7 +1,7 @@
 // Run: node --test tests/
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { cellIndex, dotStack, esc, filterRows, fmt, labStages, outcomeShares, pct, phase, refusalMessage, registerSlots, retryAfterSeconds, signed } from "../dashboard/static/lib.js";
+import { cellIndex, dotStack, esc, filterRows, fmt, fullComplete, labStages, outcomeShares, pct, phase, refusalMessage, registerSlots, retryAfterSeconds, signed } from "../dashboard/static/lib.js";
 
 const rows = [
   { key: "pilot:1", mode: "pilot", condition: "baseline_v1", family_A: "claude", family_B: "openai", model_A: "claude:x", model_B: "openai:y", first_mover: "A", outcome: "agreed", seed: 30000 },
@@ -53,7 +53,7 @@ test("outcomeShares keeps the fixed outcome order and zero-fills", () => {
 });
 
 test("phase is derived from recorded data only", () => {
-  const snap = (pilot, full, runs = []) => ({ progress: { pilot: { done: pilot, target: 24 }, full: { done: full, target: 480 } }, runs });
+  const snap = (pilot, full, runs = []) => ({ progress: { pilot: { done: pilot, target: 24 }, full: { done: full, target: 480, design_complete: full === 480 } }, runs });
   assert.equal(phase(snap(0, 0)).label, "No experimental data collected yet");
   assert.equal(phase(snap(5, 0, [{ mode: "pilot", status: "running" }])).label, "Pilot in progress");
   assert.equal(phase(snap(5, 0, [{ mode: "pilot", status: "budget_exhausted" }])).label, "Pilot incomplete");
@@ -80,7 +80,7 @@ test("registerSlots places rows by instance and cell, ignoring foreign seeds", (
 });
 
 test("labStages: empty lab is ready / locked / awaiting", () => {
-  const snap = (p, f, runs = []) => ({ progress: { pilot: { done: p, target: 24 }, full: { done: f, target: 480 } }, runs });
+  const snap = (p, f, runs = []) => ({ progress: { pilot: { done: p, target: 24 }, full: { done: f, target: 480, design_complete: f === 480 } }, runs });
   assert.deepEqual(labStages(snap(0, 0)), { pilot: "ready", full: "locked", analysis: "awaiting", empty: true });
   assert.equal(labStages(snap(3, 0, [{ mode: "pilot", status: "running" }])).pilot, "running");
   assert.equal(labStages(snap(3, 0)).pilot, "partial");
@@ -112,4 +112,76 @@ test("refusalMessage: a 5xx body is never shown, whatever it holds", () => {
     assert.ok(!/internal|Traceback|\/home\//.test(m));
   }
   assert.equal(refusalMessage(503, { error: "busy" }), refusalMessage(500, {}));
+});
+
+test("480 full-run rows are not complete unless the server's design check passed", () => {
+  const snap = { progress: { pilot: { done: 24, target: 24 }, full: { done: 480, target: 480, design_complete: false } }, runs: [] };
+  assert.deepEqual(labStages(snap), { pilot: "complete", full: "partial", analysis: "sealed", empty: false });
+  assert.notEqual(phase(snap).key, "full-complete");
+  assert.equal(fullComplete({ done: 481, target: 480 }), false);
+});
+
+// ------------------------------------------------------------------ workbench analytics helpers
+import { boxStats, completedTrials, cumulativeOutcomes, flows, journey, quantile, summarize, tally } from "../dashboard/static/lib.js";
+
+const T = [
+  { index: 0, status: "completed", outcome: "agreed", rwe: 0.9, ew: 0.4, rounds: 3, condition: "baseline_v1" },
+  { index: 2, status: "completed", outcome: "walked_away", rwe: 0, ew: 0, rounds: 10, condition: "structured_v1" },
+  { index: 1, status: "completed", outcome: "agreed", rwe: 0.7, ew: 0.3, rounds: 5, condition: "baseline_v1" },
+  { index: 3, status: "aborted", reason: "agent_failure" },
+];
+
+test("summarize: describes completed negotiations only and never invents a rate", () => {
+  const s = summarize(T);
+  assert.equal(s.n, 3); assert.equal(s.excluded, 1);
+  assert.deepEqual(s.outcomes, { agreed: 2, walked_away: 1, timeout: 0, invalid_action: 0 });
+  assert.equal(s.agreement_rate, 2 / 3); assert.equal(s.walk_rate, 1 / 3); assert.equal(s.invalid_rate, 0);
+  assert.ok(Math.abs(s.rwe - 1.6 / 3) < 1e-12); assert.equal(s.rounds, 6);
+  const empty = summarize([]);
+  assert.equal(empty.n, 0); assert.equal(empty.agreement_rate, null); assert.equal(empty.rwe, null);
+  assert.equal(completedTrials(undefined).length, 0);
+});
+
+test("quantile and boxStats match numpy's linear method and Tukey whiskers", () => {
+  assert.equal(quantile([1, 2, 3, 4], 0.25), 1.75);
+  assert.equal(quantile([], 0.5), null);
+  const b = boxStats([1, 2, 3, 4, 100, null]);
+  assert.equal(b.n, 5); assert.equal(b.median, 3); assert.equal(b.q1, 2); assert.equal(b.q3, 4);
+  assert.deepEqual(b.outliers, [100]); assert.equal(b.hi, 4); assert.equal(b.lo, 1);
+  assert.equal(boxStats([null]), null);
+});
+
+test("cumulativeOutcomes runs in negotiation order; flows count each transition once", () => {
+  const c = cumulativeOutcomes(T);
+  assert.deepEqual(c.map((r) => [r.k, r.agreed, r.walked_away]), [[1, 1, 0], [2, 2, 0], [3, 2, 1]]);
+  const f = flows(T, [(t) => t.condition, (t) => t.outcome]);
+  assert.deepEqual(f.sort((a, b) => b.n - a.n), [{ stage: 0, from: "baseline_v1", to: "agreed", n: 2 }, { stage: 0, from: "structured_v1", to: "walked_away", n: 1 }]);
+  assert.deepEqual([...tally(["a", "b", "a"])], [["a", 2], ["b", 1]]);
+});
+
+test("journey: built-ins never count as the user's own work", () => {
+  assert.deepEqual(journey({ agents: [{ builtin: true }], environments: [{ builtin: true }] }), { agents: false, resources: false, experiment: false, analysis: false });
+  assert.deepEqual(journey({ agents: [{}], environments: [{}], simulations: [{ status: "running", done: 1 }] }), { agents: true, resources: true, experiment: true, analysis: false });
+  assert.equal(journey({ simulations: [{ status: "completed", done: 4 }] }).analysis, true);
+});
+
+import { actionCounts, normalize100 } from "../dashboard/static/lib.js";
+
+test("normalize100: whole numbers that always sum to exactly 100", () => {
+  assert.deepEqual(normalize100([1, 1, 1]), [34, 33, 33]);
+  assert.deepEqual(normalize100([50, 30, 20]), [50, 30, 20]);
+  assert.deepEqual(normalize100([0, 0]), [50, 50]);
+  assert.deepEqual(normalize100([3, NaN, -2, 1]), [75, 0, 0, 25]);
+  for (const v of [[7, 13, 2, 9, 1, 5], [1, 2], [99, 1, 1]]) assert.equal(normalize100(v).reduce((a, b) => a + b, 0), 100);
+});
+
+test("actionCounts: an offer answered by a counter-offer or a walk-away counts as rejected", () => {
+  const ev = (actor, action) => ({ actor, action });
+  const c = actionCounts([
+    { status: "completed", events: [ev("A", "OFFER"), ev("B", "OFFER"), ev("A", "ACCEPT")] },
+    { status: "completed", events: [ev("A", "OFFER"), ev("B", "WALK_AWAY")] },
+    { status: "completed", events: [ev("B", "INVALID")] },
+    { status: "aborted", events: [ev("A", "OFFER")] },
+  ]);
+  assert.deepEqual(c, { offers: 3, accepted: 1, rejected: 2, walkaways: 1, invalid: 1 });
 });

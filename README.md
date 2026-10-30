@@ -1,5 +1,58 @@
 # Multi-Agent Cooperation: Resource-Split Negotiation Game
 
+## Live demo
+
+**Live demo: _not deployed yet_.** The link is added here once the Render service is live and has been checked.
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/Jenoyrex/multi-agent-cooperation)
+
+**Cooperation Lab** is an experimental research platform for multi-agent negotiation. You configure agents,
+define the resources they divide and how much each agent privately values them, run experiments on a
+fixed negotiation engine, watch them live, and explore automatically computed behavioural analytics.
+Alongside it sits a preregistered research study comparing Claude and GPT, shown read-only.
+
+> **Simulated vs. real-model results.** Every experiment in the public demo uses rule-based agents and is
+> labelled **simulated**: it shows how the lab measures negotiation behaviour, not how any AI model behaves.
+> No AI provider is called anywhere in the demo, and the project spends ₹0. Real-model results would come only
+> from the preregistered study (Claude vs GPT), which has not been run. No such results exist in this repository.
+
+**Features**
+- Guided start page: add agents → define resources → run an experiment → explore results → export.
+- Agents: built-in rule-based strategies with adjustable bargaining; Claude, GPT and Gemini configurations (saved but
+  locked, never called); upload your own Python agent file. It is **checked by reading its code, never executed**.
+- Resource builder with quantities, units, categories and each agent's private values.
+- Five-step experiment wizard, live monitoring, and interactive analytics: outcome mix, value captured, who got
+  what, turn-by-turn timelines, condition → outcome flows, behaviour profiles, concession curves, value vs. ask
+  heatmaps, plus plain-language findings that state their basis.
+- Cross-experiment analytics, a two-experiment comparison (labelled exploratory), printable reports (save as PDF),
+  and CSV / JSON / Markdown exports.
+- Light, dark and system themes; works on phones.
+
+**Stack:** Python standard-library HTTP server (`dashboard/server.py`) plus `pydantic`; vanilla JavaScript with
+no build step; SVG charts; SQLite for local storage; Motion (vendored) for animation; Inter and JetBrains Mono
+fonts (SIL OFL, self-hosted).
+
+**Run it locally** (Python 3.10+):
+
+```bash
+pip install "pydantic>=2.6" "python-dotenv>=1.0"   # or: pip install -e ".[dev]" for tests and the research tools
+python -m dashboard.server                          # then open http://127.0.0.1:8765
+```
+
+On Windows, use `py` where `python` is the Microsoft Store stub. Local runs keep everything on your machine:
+Workbench data lives in `sandbox_runs/workbench.db`, separate from research data in `results/`.
+
+**Deployment.** `render.yaml` describes a free Render web service: no build step beyond two pip packages,
+`python -m dashboard.server --host 0.0.0.0` on Render's `$PORT`, health check `/healthz`, and `PUBLIC_DEMO=1`.
+In that mode the site is a **shared presentation demo**:
+- everything visitors create is visible to all visitors and cannot be edited or deleted;
+- local HTTP agents are off;
+- experiments are capped at 48 negotiations, and run starts are rate-limited;
+- error responses carry no technical detail.
+
+Render's free tier wipes the disk on every restart, deploy or idle spin-down (after about 15 minutes without
+traffic), so **demo data is temporary**. The first visit after idling takes up to a minute while the service wakes.
+
 **Status: Phase 0/1 complete. No experiments have been run. This repo
 currently contains the formal spec, the harness, and a zero-cost
 plumbing test — not results.**
@@ -122,11 +175,16 @@ because the §8.9 analysis has not been implemented yet.
 
 ## Workbench (exploratory, zero cost)
 
-The dashboard's **Workbench** lets you build agents and environments (visual editor, JSON or text import),
-run designed simulations on the unchanged engine, follow them live, and read behavioural analytics and
-exports. Rule-based and Python agents run locally at no cost; Claude, GPT and Gemini entries are configurable
-but locked. Rule-based runs are labelled simulated, runs with your local HTTP agents are labelled local agents, and both are stored in `sandbox_runs/`, never `results/`.
+The dashboard opens on **Start**, a guided path through the **Workspace**: Agents, Resources, Experiments,
+Analytics and Reports. You add agents (built-in strategies, locked AI providers, or an uploaded `.py` file that is
+inspected but never executed), define resources, run designed experiments on the unchanged engine through a
+step-by-step wizard, follow them live, explore interactive behavioural analytics, compare experiments, and save
+reports as PDF or export CSV/JSON. Light, dark and system themes are in **Settings**. Rule-based and Python
+agents run locally at no cost; Claude, GPT and Gemini entries are configurable but locked. Rule-based runs are labelled simulated, runs with your local HTTP agents are labelled local agents, and both are stored in `sandbox_runs/`, never `results/`.
 See [docs/workbench.md](docs/workbench.md).
+
+Zero-cost end-to-end demo: `PYTHONPATH=. py scripts/run_workbench_demo.py`. The preregistered §8.9 analysis is
+`src/evaluation/inference.py` (`scripts/run_analysis.py --db <full-run db>`; it refuses anything but the complete full run).
 
 ## Public demo mode
 

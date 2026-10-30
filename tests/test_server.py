@@ -332,3 +332,18 @@ def test_healthz_is_tiny_and_reveals_nothing(pub, monkeypatch):
         status, h, body = _request(pub, "GET", "/healthz", [("Host", host)])
         assert status == 200 and json.loads(body) == {"status": "ok"}
         assert h.get_all("Cache-Control") == ["no-store"]
+
+
+def test_a_failing_get_answers_500_with_the_security_headers(monkeypatch):
+    """Continuation review: an exception inside do_GET used to drop the connection with no reply and no headers."""
+    srv = _serve()
+    port = srv.server_address[1]
+    host = [("Host", f"127.0.0.1:{port}")]
+    try:
+        monkeypatch.setattr(server.workbench_api, "get", lambda path: 1 / 0)
+        status, headers, raw = _request(port, "GET", "/api/workbench/catalog", host)
+        assert status == 500 and json.loads(raw) == {"error": "internal error"}
+        assert headers["X-Frame-Options"] == "DENY" and "frame-ancestors 'none'" in headers["Content-Security-Policy"]
+    finally:
+        srv.shutdown()
+        srv.server_close()

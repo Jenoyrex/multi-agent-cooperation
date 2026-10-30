@@ -1,0 +1,26 @@
+# Render Blueprint: the public, zero-cost presentation demo of Cooperation Lab.
+# Free web service, no database, no secrets. Storage is the instance's own disk, which Render wipes on every
+# restart, deploy or idle spin-down, so demo experiments are temporary by design.
+services:
+  - type: web
+    name: cooperation-lab
+    runtime: python
+    plan: free
+    region: singapore
+    branch: main
+    autoDeploy: true
+    # The server is the Python standard library plus pydantic and python-dotenv. The provider SDKs are not
+    # installed here, so no AI client exists on the host at all.
+    buildCommand: pip install "pydantic>=2.6" "python-dotenv>=1.0"
+    # Binds 0.0.0.0 on Render's $PORT; RENDER_EXTERNAL_HOSTNAME is accepted as the public host automatically.
+    startCommand: python -m dashboard.server --host 0.0.0.0
+    healthCheckPath: /healthz
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.4"
+      # Shared presentation mode: rule-based agents only, rate limits, create-only workspace, no error details.
+      - key: PUBLIC_DEMO
+        value: "1"
+      # Belt and braces: the zero-cost guard refuses paid provider calls unless this is exactly "1".
+      - key: ALLOW_PAID_PROVIDER_CALLS
+        value: "0"

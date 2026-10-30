@@ -10,7 +10,8 @@ Every /api/* request must name this machine in its Host header (127.0.0.1 or
 localhost on this port), so a DNS-rebinding page cannot read or start anything.
 Behind an HTTPS proxy, the exact hostnames in $PUBLIC_HOSTS (comma-separated,
 no wildcards) are accepted too, and a POST to them needs the matching https://
-Origin. X-Forwarded-* headers are never read. Unset $PUBLIC_HOSTS = local only.
+Origin. X-Forwarded-* headers are never read. On Render, $RENDER_EXTERNAL_HOSTNAME (set by the platform) is added to them.
+Neither set = local only.
 
   GET /healthz                 200 {"status": "ok"}; touches no data, for load-balancer health checks
 
@@ -66,6 +67,8 @@ DEFAULT_HOST, DEFAULT_PORT = "127.0.0.1", 8765
 CONNECTION_TIMEOUT_S = 15  # per socket read/write of one HTTP connection (not the Agent Lab turn deadline)
 MAX_CONNECTIONS = 32       # concurrent request threads; one more connection gets 503 and is closed
 MAX_BODY_BYTES = 16_384    # largest POST body a route will read
+UPLOAD_BODY_BYTES = 128 * 1024  # routes that carry an uploaded agent file (48 KB of source, JSON-escaped)
+UPLOAD_ROUTES = frozenset({"/api/workbench/uploads/inspect", "/api/workbench/agents"})
 DRAIN_MAX_BYTES, DRAIN_MAX_S = 64 * 1024, 2.0  # most a refused POST's body is read and discarded
 HOSTNAME_RE = re.compile(r"^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$")
 BUSY = (b"HTTP/1.0 503 Service Unavailable\r\nContent-Type: text/plain\r\nContent-Length: 5\r\n"
@@ -147,6 +150,13 @@ class Handler(SimpleHTTPRequestHandler):
         return "public" if host.lower() in self.public_hosts else None
 
     def do_GET(self):
+        try:
+            return self._get()
+        except Exception:  # noqa: BLE001 — always answer (with the security headers); the traceback goes to the server log only
+            traceback.print_exc()
+            return self._json({"error": "internal error"}, 500)
+
+    def _get(self):
         url = urlparse(self.path)
         if url.path == "/healthz":
             return self._json({"status": "ok"})
@@ -204,8 +214,9 @@ class Handler(SimpleHTTPRequestHandler):
 
     def do_POST(self):
         raw = self.headers.get("Content-Length", "")  # absent or not a number: no body to read
-        length = (int(raw) if len(raw) <= 9 else MAX_BODY_BYTES + 1) if raw.isascii() and raw.isdigit() else 0
         path = urlparse(self.path).path
+        limit = UPLOAD_BODY_BYTES if path in UPLOAD_ROUTES else MAX_BODY_BYTES
+        length = (int(raw) if len(raw) <= 9 else limit + 1) if raw.isascii() and raw.isdigit() else 0
         route = None if demo.enabled() and path in DEMO_ABSENT_ROUTES else POST_ROUTES.get(path) or workbench_api.post_route(path)
         if route is None:  # an absent route does nothing with the body but discard it
             return self._refuse(length, {"error": "method not allowed"}, 405)
@@ -221,7 +232,7 @@ class Handler(SimpleHTTPRequestHandler):
             return self._refuse(length, {"error": "cross-origin request refused"}, 403)
         if self.headers.get("Content-Type", "").split(";")[0].strip() != "application/json":
             return self._refuse(length, {"error": "expected application/json"}, 415)
-        if not 0 < length <= MAX_BODY_BYTES:
+        if not 0 < length <= limit:
             return self._refuse(length, {"error": "request body missing or too large"}, 413)
         try:
             return self._json(*route(json.loads(self.rfile.read(length))))
@@ -310,7 +321,8 @@ def settings(argv=None, environ=None) -> argparse.Namespace:
     if not 0 <= args.port <= 65535:
         parser.error(f"port {args.port} is out of range")
     try:
-        args.public_hosts = public_hosts(environ.get("PUBLIC_HOSTS", ""))
+        # On Render, the service's own public hostname is provided as RENDER_EXTERNAL_HOSTNAME; it is accepted too.
+        args.public_hosts = public_hosts(",".join(filter(None, (environ.get("PUBLIC_HOSTS", ""), environ.get("RENDER_EXTERNAL_HOSTNAME", "")))))
     except ValueError as exc:
         parser.error(str(exc))
     return args
