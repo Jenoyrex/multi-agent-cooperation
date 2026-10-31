@@ -552,7 +552,7 @@ export function createWorkbench({ main, h, render, onCleanup, motion }) {
     const tabs = [["live", doc.status === "running" ? "Live" : "Summary"], ["analytics", "Analytics"], ["negotiations", `Negotiations (${doc.trials.length})`], ["log", "Log"], ["export", "Export"]];
     if (!tabs.some(([k]) => k === state.simTab)) state.simTab = "live";
     const sum = summarize(doc.trials);
-    return `${top(doc.config.name, `${esc(doc.config.agents.X.name)} vs ${esc(doc.config.agents.Y.name)} · ${esc(doc.config.environment.name)} · started ${when(doc.created)}`,
+    return `${top(doc.config.name, `${esc(doc.config.agents.X.name)} vs ${esc(doc.config.agents.Y.name)} · ${esc(doc.config.environment.name)} · started <time data-ago="${doc.created}">${when(doc.created)}</time>`,
         `${statusBadge(doc.status)}<a class="btn" href="#/report/${doc.id}">${icon("doc")}Report</a>`, backLink("#/simulations", "Experiments"))}
       <p class="datalabel ${doc.config.data_kind}">${icon("info")}<span><b>${esc(doc.config.label.split(":")[0])}.</b>${esc(doc.config.label.slice(doc.config.label.indexOf(":") + 1))}</span></p>
       <div class="runbar"><div class="wb-progress" role="progressbar" aria-label="Negotiations finished" aria-valuemin="0" aria-valuemax="${doc.plan_size}" aria-valuenow="${doc.trials.length}"><i style="transform:scaleX(${doc.trials.length / doc.plan_size})"></i></div>
@@ -571,6 +571,7 @@ export function createWorkbench({ main, h, render, onCleanup, motion }) {
   }
 
   const tape = (doc) => `<div class="otape" aria-label="Finished negotiations by outcome">${doc.trials.map((t) => `<button type="button" class="ot ${t.status === "completed" ? t.outcome : "aborted"}" style="--c:${t.status === "completed" ? OUT_COLOR[t.outcome] : "var(--sunk)"}" data-goto="${t.index}" data-tip="${esc(`#${t.index + 1}: ${t.status === "completed" ? OUTCOME_LABEL[t.outcome] : t.status}${t.rounds ? ` after ${t.rounds} turns` : ""}`)}" aria-label="Negotiation ${t.index + 1}: ${esc(t.status === "completed" ? OUTCOME_LABEL[t.outcome] : t.status)}"></button>`).join("")}${Array.from({ length: Math.max(0, doc.plan_size - doc.trials.length) }, () => '<i class="ot pending"></i>').join("")}</div>`;
+  const tapeLegend = (doc) => `<div class="legend ot-legend">${OUTCOMES.map((o) => `<span><i class="ot ${o}" style="--c:${OUT_COLOR[o]}"></i>${OUTCOME_LABEL[o]}</span>`).join("")}${doc.trials.some((t) => t.status !== "completed") ? '<span><i class="ot aborted"></i>Aborted (infrastructure)</span>' : ""}${doc.plan_size > doc.trials.length ? '<span><i class="ot pending"></i>Pending</span>' : ""}</div>`;
   function liveStats(doc) {
     const s = summarize(doc.trials), c = actionCounts(doc.trials);
     const tile = (k, v, sub = "") => `<div class="stat"><dt>${k}</dt><dd>${v}</dd>${sub ? `<span class="sub">${sub}</span>` : ""}</div>`;
@@ -581,7 +582,7 @@ export function createWorkbench({ main, h, render, onCleanup, motion }) {
 
   function livePanel(doc) {
     const cfg = doc.config, live = doc.live;
-    const base = `${liveStats(doc)}<h3 class="wb-h4">Outcomes so far</h3>${tape(doc)}`;
+    const base = `${liveStats(doc)}<h3 class="wb-h4">${doc.status === "running" ? "Outcomes so far" : "Outcomes"}</h3>${tape(doc)}${tapeLegend(doc)}`;
     if (doc.status !== "running" || !live) {
       return `${base}<section class="block">${doc.error ? notice("warn", "alert", `<b>Stopped by an error.</b> ${esc(doc.error)}`) : ""}
         <div class="nextsteps"><button type="button" class="cta" data-simtab-go="analytics">${icon("chart")}Explore the analysis</button><button type="button" class="btn" data-simtab-go="negotiations">Read the negotiations</button><a class="btn" href="#/report/${doc.id}">${icon("doc")}Open the report</a></div>
@@ -812,6 +813,9 @@ export function createWorkbench({ main, h, render, onCleanup, motion }) {
       h.animateCharts(panel);
     }
     wirePanel();
+    // Keep relative times ("started 2 min ago") current while the page is open.
+    const ago = setInterval(() => main.querySelectorAll("time[data-ago]").forEach((t) => (t.textContent = timeAgo(+t.dataset.ago))), 30000);
+    onCleanup(() => clearInterval(ago));
     if (state.doc.status !== "running") return;
     // Poll while it runs; the view only ever shows what the engine reported.
     let seen = state.doc.live?.turns.length ?? 0, index = state.doc.live?.index;
@@ -834,7 +838,7 @@ export function createWorkbench({ main, h, render, onCleanup, motion }) {
       const th = doc.live.thinking;
       main.querySelector("#live-thinking").innerHTML = th ? `<i></i>${esc(seatName(doc, doc.live.spec.seats, th.seat))} is deciding turn ${th.round}…` : "";
       main.querySelector("#live-stats").outerHTML = liveStats(doc);
-      if (doc.trials.length !== prev.trials.length) { main.querySelector(".otape").outerHTML = tape(doc); main.querySelectorAll(".otape [data-goto]").forEach((b) => b.addEventListener("click", () => openTrial(+b.dataset.goto))); }
+      if (doc.trials.length !== prev.trials.length) { main.querySelector(".otape").outerHTML = tape(doc); main.querySelector(".ot-legend").outerHTML = tapeLegend(doc); main.querySelectorAll(".otape [data-goto]").forEach((b) => b.addEventListener("click", () => openTrial(+b.dataset.goto))); }
     }, 400);
     onCleanup(() => clearInterval(timer));
   }
