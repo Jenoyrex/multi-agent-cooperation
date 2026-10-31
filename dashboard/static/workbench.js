@@ -853,7 +853,6 @@ export function createWorkbench({ main, h, render, onCleanup, motion }) {
 
   return {
     routes: { agents, environments, simulations, simulation },
-    nav: { simulation: "simulations" },
     names: ["agents", "environments", "simulations", "simulation"],
     wire,
     shared: { getJSON, post, badge, statusBadge, top, backLink, section, empty, chartCard, kpis, outcomeCharts, agentCharts, condTable, experimentList, download, catalog, quickStart, runBadge, CAT, when },

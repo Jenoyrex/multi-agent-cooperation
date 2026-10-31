@@ -84,9 +84,10 @@ def public_hosts(value: str) -> frozenset:
 
 
 def _inline_script_hashes(html: bytes) -> list[str]:
-    """CSP hashes of index.html's inline scripts, from the bytes as served (so line endings can't break them)."""
-    return [f"'sha256-{base64.b64encode(hashlib.sha256(s).digest()).decode()}'"
-            for s in re.findall(rb"<script>(.*?)</script>", html, re.S)]
+    """CSP hashes of index.html's inline scripts. Browsers hash the script text after the HTML parser has turned
+    CRLF and CR into LF, so the same is done here: a CRLF checkout (Windows, core.autocrlf) must not block the script."""
+    scripts = (s.replace(b"\r\n", b"\n").replace(b"\r", b"\n") for s in re.findall(rb"<script>(.*?)</script>", html, re.S))
+    return [f"'sha256-{base64.b64encode(hashlib.sha256(s).digest()).decode()}'" for s in scripts]
 
 
 # Everything is same-origin. Styles need 'unsafe-inline': the templates use style="" attributes and

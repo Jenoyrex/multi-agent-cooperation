@@ -196,12 +196,13 @@ export function flows(trials, stages) {
 /** Count of each value, in first-seen order. */
 export const tally = (values) => values.reduce((m, v) => m.set(v, (m.get(v) ?? 0) + 1), new Map());
 
-/** Which onboarding steps are done, from real records only (built-ins do not count as the user's own). */
-export function journey({ agents = [], environments = [], simulations = [] }) {
-  const done = simulations.filter((s) => s.status === "completed" && s.done > 0);
-  return { agents: agents.some((a) => !a.builtin), resources: environments.some((e) => !e.builtin),
-    experiment: simulations.length > 0, analysis: done.length > 0 };
-}
+/** The six top-level sections. Every route keeps its hash and belongs to one of them. */
+export const SECTION = { "": "home", help: "help", settings: "settings", try: "new", lab: "new",
+  simulations: "mine", simulation: "mine", analytics: "mine", reports: "mine", report: "mine", live: "mine", result: "mine", compare: "mine",
+  agents: "library", environments: "library",
+  study: "study", example: "study", experiments: "study", negotiation: "study", results: "study", structured: "study", methodology: "study", configuration: "study" };
+/** Section of a route; the experiment wizard (#/simulations/new...) belongs to "New experiment". */
+export const navOf = (name, arg = "") => (name === "simulations" && arg.startsWith("new") ? "new" : SECTION[name] ?? "");
 
 /** Scale non-negative numbers to whole numbers summing to exactly 100 (largest remainder; equal split when all are 0). */
 export function normalize100(values) {

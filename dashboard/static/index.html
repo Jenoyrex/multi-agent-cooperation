@@ -59,36 +59,20 @@ document.querySelector('meta[name="theme-color"]').content=t==="dark"?"#0b0b0d":
       <svg viewBox="0 0 34 22" aria-hidden="true"><rect x="1" y="9" width="32" height="4" rx="2" fill="var(--scale)"/><rect x="1" y="9" width="18" height="4" rx="2" fill="var(--base)"/><rect x="19" y="9" width="14" height="4" rx="2" fill="var(--struct)"/><circle cx="19" cy="11" r="6" fill="none" stroke="var(--ink)" stroke-width="1.6"/></svg>
       <span><b>Cooperation Lab</b><small>Multi-agent experiments</small></span>
     </a>
-    <nav>
-      <div class="navgroup"><span>Workspace</span>
-        <a href="#/" data-route="start"><svg class="icon"><use href="#i-home"/></svg>Start</a>
-        <a href="#/agents" data-route="agents"><svg class="icon"><use href="#i-users"/></svg>Agents</a>
-        <a href="#/environments" data-route="environments"><svg class="icon"><use href="#i-box"/></svg>Resources</a>
-        <a href="#/simulations" data-route="simulations"><svg class="icon"><use href="#i-flask"/></svg>Experiments</a>
-        <a href="#/analytics" data-route="analytics"><svg class="icon"><use href="#i-chart"/></svg>Analytics</a>
-        <a href="#/reports" data-route="reports"><svg class="icon"><use href="#i-doc"/></svg>Reports</a>
-      </div>
-      <div class="navgroup"><span>Playground</span>
-        <a href="#/try" data-route="try"><svg class="icon"><use href="#i-play"/></svg>Try a negotiation</a>
-        <a href="#/compare" data-route="compare"><svg class="icon"><use href="#i-compare"/></svg>Compare runs</a>
-        <a href="#/lab" data-route="lab"><svg class="icon"><use href="#i-terminal"/></svg>Agent Lab</a>
-      </div>
-      <div class="navgroup"><span>Research study</span>
-        <a href="#/study" data-route="study"><svg class="icon"><use href="#i-book"/></svg>Overview</a>
-        <a href="#/experiments" data-route="experiments"><svg class="icon"><use href="#i-list"/></svg>Data collection <b class="count" id="nav-status" title="Controlled negotiations recorded"></b></a>
-        <a href="#/results" data-route="results"><svg class="icon"><use href="#i-chart"/></svg>Results</a>
-        <a href="#/methodology" data-route="methodology"><svg class="icon"><use href="#i-doc"/></svg>Methodology</a>
-        <a href="#/configuration" data-route="configuration"><svg class="icon"><use href="#i-sliders"/></svg>Configuration</a>
-      </div>
-      <div class="navgroup">
-        <a href="#/settings" data-route="settings"><svg class="icon"><use href="#i-gear"/></svg>Settings</a>
-      </div>
+    <nav aria-label="Main">
+      <a href="#/" data-route="home"><svg class="icon"><use href="#i-home"/></svg>Home</a>
+      <a href="#/simulations/new" data-route="new"><svg class="icon"><use href="#i-plus"/></svg>New experiment</a>
+      <a href="#/simulations" data-route="mine"><svg class="icon"><use href="#i-flask"/></svg>My experiments</a>
+      <a href="#/agents" data-route="library"><svg class="icon"><use href="#i-users"/></svg>Agents &amp; resources</a>
+      <a href="#/study" data-route="study"><svg class="icon"><use href="#i-book"/></svg>Research study <b class="count" id="nav-status" title="Research negotiations recorded"></b></a>
+      <a href="#/help" data-route="help"><svg class="icon"><use href="#i-info"/></svg>Help</a>
     </nav>
     <div class="rail-foot">
       <span class="live" id="live" title="Research study data is read-only and refreshed every 10 seconds."><i></i><span>Study data live</span></span>
+      <span class="foot-tools"><a class="footlink" href="#/settings" data-route="settings">Settings</a>
       <button class="theme" id="theme" type="button" aria-label="Switch between dark and light theme">
         <svg class="icon sun"><use href="#i-sun"/></svg><svg class="icon moon"><use href="#i-moon"/></svg>
-      </button>
+      </button></span>
     </div>
   </aside>
   <main id="main" tabindex="-1"><div class="boot" role="status"><div class="scanner"></div>Opening the lab…</div></main>

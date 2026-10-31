@@ -122,7 +122,7 @@ test("480 full-run rows are not complete unless the server's design check passed
 });
 
 // ------------------------------------------------------------------ workbench analytics helpers
-import { boxStats, completedTrials, cumulativeOutcomes, flows, journey, quantile, summarize, tally } from "../dashboard/static/lib.js";
+import { boxStats, completedTrials, cumulativeOutcomes, flows, navOf, quantile, SECTION, summarize, tally } from "../dashboard/static/lib.js";
 
 const T = [
   { index: 0, status: "completed", outcome: "agreed", rwe: 0.9, ew: 0.4, rounds: 3, condition: "baseline_v1" },
@@ -159,10 +159,15 @@ test("cumulativeOutcomes runs in negotiation order; flows count each transition 
   assert.deepEqual([...tally(["a", "b", "a"])], [["a", 2], ["b", 1]]);
 });
 
-test("journey: built-ins never count as the user's own work", () => {
-  assert.deepEqual(journey({ agents: [{ builtin: true }], environments: [{ builtin: true }] }), { agents: false, resources: false, experiment: false, analysis: false });
-  assert.deepEqual(journey({ agents: [{}], environments: [{}], simulations: [{ status: "running", done: 1 }] }), { agents: true, resources: true, experiment: true, analysis: false });
-  assert.equal(journey({ simulations: [{ status: "completed", done: 4 }] }).analysis, true);
+test("navOf: every pre-redesign route still belongs to one of six sections", () => {
+  const old = ["", "agents", "environments", "simulations", "simulation", "analytics", "reports", "report", "settings", "try", "live", "result", "compare", "lab",
+    "study", "example", "experiments", "negotiation", "results", "structured", "methodology", "configuration"];
+  for (const r of old) assert.ok(SECTION[r], `route ${r} has no section`);
+  assert.equal(new Set(Object.values(SECTION).filter((s) => s !== "settings")).size, 6);
+  assert.equal(navOf("simulations"), "mine");
+  assert.equal(navOf("simulations", "new/review"), "new");
+  assert.equal(navOf("experiments"), "study"); // research data collection, not the Workbench list
+  assert.equal(navOf("nope"), "");
 });
 
 import { actionCounts, normalize100 } from "../dashboard/static/lib.js";
