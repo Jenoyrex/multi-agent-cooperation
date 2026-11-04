@@ -155,3 +155,7 @@ machine here). `pip install git+https://...` needs the branch pushed, so it was 
 **Loops 2 to 4: models, agents, resources (backend).** Committed together because the modules depend on one another.
 Fake-server and stub tests cover local and BYO-key agents, test connection, 401/429/timeout/malformed output, caps,
 consent, key leaks, all agent types, privacy, the demo lockout, events and sweeps. pytest 692 at this point. UI comes in Loop 6.
+
+**Loop 5: analysis (backend).** Behaviour profiles, event reactions, sweep comparison, findings, labelled exports; chart numbers recomputed from `metrics.csv` in a test. pytest 703, node 20.
+
+**Status: stopped partway, usage limit reached.** Loops 6 and 7 are NOT done. `dashboard/static/sandboxui.js` is written but not wired in, has never run, and imports helpers (`designSize`, `simBody`, `fmtCI`, `sourceSummary`) not yet in `lib.js`. Nothing loads it, so the app is unaffected. Until Loop 6 lands, the new backend features have no UI, and the UI still says keys are never entered and providers are locked. Exit checks and the feature table are not ticked. Known gap: `provenance.zero_cost_mode` still reads true for API-key runs, and `report.md` repeats it; fix before release.
