@@ -496,11 +496,13 @@ export function createWorkbench({ main, h, render, onCleanup, motion }) {
     const blocker = step === 0 && !(a?.executable && b?.executable) ? "Choose two agents that can run." : step === 3 && !d.conditions.length ? "Choose at least one condition." : "";
     const nextBtn = step < STEPS.length - 1 ? `<a class="cta" href="#/simulations/new/${STEPS[step + 1][0]}"${blocker ? ' aria-disabled="true" data-block' : ""}>Continue${icon("chev-r")}</a>`
       : `<button type="button" class="cta" id="launch"${n > lim.negotiations || !d.conditions.length ? " disabled" : ""}>${icon("play")}Run ${n} negotiation${n === 1 ? "" : "s"}</button>`;
-    return `${top("New experiment", "", "", backLink("#/simulations", "Experiments"))}${stepper}
+    const skip = step < STEPS.length - 1 && !blocker ? `<a class="linkbtn" href="#/simulations/new/review">Skip to review</a>` : "";
+    return `${top("New experiment", step ? "" : "Every step starts with working defaults: two built-in agents, the research generator, both instruction conditions, seats and first mover swapped. Change what you like, or skip straight to the review.", "", backLink("#/simulations", "Experiments"))}${stepper}
       <div class="wb-split"><form class="sheet wizard" id="sim-form" novalidate>${body}${errorLine(blocker)}
-        <div class="stepnav">${step ? `<a class="btn" href="#/simulations/new/${STEPS[step - 1][0]}">${icon("chev-l")}Back</a>` : '<span></span>'}${nextBtn}</div></form>
+        <div class="stepnav">${step ? `<a class="btn" href="#/simulations/new/${STEPS[step - 1][0]}">${icon("chev-l")}Back</a>` : '<span></span>'}<span class="stepnav-r">${skip}${nextBtn}</span></div></form>
       <aside class="sheet wb-aside"><h2 class="wb-h3">So far</h2><dl class="kvs"><dt>Agents</dt><dd>${esc(a?.name ?? "—")} · ${esc(b?.name ?? "—")}</dd><dt>Resources</dt><dd>${esc(env?.name ?? "—")}</dd>
-        <dt>Negotiations</dt><dd>${n}</dd><dt>Cost</dt><dd>₹0</dd></dl></aside></div>`;
+        <dt>Negotiations</dt><dd>${n}</dd><dt>Cost</dt><dd>₹0</dd></dl>
+        <h2 class="wb-h3">Other ways to start</h2><ul class="plainlist"><li><a href="#/try">Try a single negotiation</a> <span class="sub">one negotiation, turn by turn</span></li><li><a href="#/lab">Agent Lab</a> <span class="sub">a balanced evaluation of two agents</span></li></ul></aside></div>`;
   }
 
   function wireWizard() {
@@ -557,6 +559,7 @@ export function createWorkbench({ main, h, render, onCleanup, motion }) {
       <p class="datalabel ${doc.config.data_kind}">${icon("info")}<span><b>${esc(doc.config.label.split(":")[0])}.</b>${esc(doc.config.label.slice(doc.config.label.indexOf(":") + 1))}</span></p>
       <div class="runbar"><div class="wb-progress" role="progressbar" aria-label="Negotiations finished" aria-valuemin="0" aria-valuemax="${doc.plan_size}" aria-valuenow="${doc.trials.length}"><i style="transform:scaleX(${doc.trials.length / doc.plan_size})"></i></div>
         <span class="sub" id="progress-text">${doc.trials.length} of ${doc.plan_size} negotiations · ${elapsed(doc)}${sum.n ? ` · ${pct(sum.agreement_rate)} agreed` : ""}</span></div>
+      ${keyNumbers(doc)}
       <nav class="tabs" aria-label="Experiment views" id="simtabs">${tabs.map(([k, t]) => `<a href="#/simulation/${doc.id}" data-simtab="${k}"${state.simTab === k ? ' aria-current="page"' : ""}>${t}</a>`).join("")}</nav>
       <div id="simpanel">${simPanel(doc)}</div>`;
   }
@@ -574,15 +577,14 @@ export function createWorkbench({ main, h, render, onCleanup, motion }) {
   const tapeLegend = (doc) => `<div class="legend ot-legend">${OUTCOMES.map((o) => `<span><i class="ot ${o}" style="--c:${OUT_COLOR[o]}"></i>${OUTCOME_LABEL[o]}</span>`).join("")}${doc.trials.some((t) => t.status !== "completed") ? '<span><i class="ot aborted"></i>Aborted (infrastructure)</span>' : ""}${doc.plan_size > doc.trials.length ? '<span><i class="ot pending"></i>Pending</span>' : ""}</div>`;
   function liveStats(doc) {
     const s = summarize(doc.trials), c = actionCounts(doc.trials);
-    const tile = (k, v, sub = "") => `<div class="stat"><dt>${k}</dt><dd>${v}</dd>${sub ? `<span class="sub">${sub}</span>` : ""}</div>`;
-    return `<dl class="stats" id="live-stats">${tile("Finished", `${doc.trials.length}<small> / ${doc.plan_size}</small>`)}${tile("Agreed", s.outcomes.agreed, s.n ? pct(s.agreement_rate) : "")}
-      ${tile("Walked away", s.outcomes.walked_away)}${tile("Timed out", s.outcomes.timeout)}${tile("Invalid", s.outcomes.invalid_action)}
-      ${tile("Offers", c.offers, `${c.rejected} rejected · ${c.accepted} accepted`)}${tile("Elapsed", elapsed(doc))}</dl>`;
+    const item = (k, v) => `<div><dt>${k}</dt><dd>${v}</dd></div>`;
+    return `<dl class="factline" id="live-stats">${item("Finished", `${doc.trials.length} of ${doc.plan_size}`)}${item("Agreed", s.outcomes.agreed)}${item("Walked away", s.outcomes.walked_away)}
+      ${item("Timed out", s.outcomes.timeout)}${item("Invalid", s.outcomes.invalid_action)}${item("Offers", `${c.offers} <span class="sub">(${c.rejected} rejected, ${c.accepted} accepted)</span>`)}${item("Elapsed", elapsed(doc))}</dl>`;
   }
 
   function livePanel(doc) {
     const cfg = doc.config, live = doc.live;
-    const base = `${liveStats(doc)}<h3 class="wb-h4">${doc.status === "running" ? "Outcomes so far" : "Outcomes"}</h3>${tape(doc)}${tapeLegend(doc)}`;
+    const base = `<h3 class="wb-h4">${doc.status === "running" ? "Outcomes so far" : "Outcomes"}</h3>${tape(doc)}${tapeLegend(doc)}${liveStats(doc)}`;
     if (doc.status !== "running" || !live) {
       return `${base}<section class="block">${doc.error ? notice("warn", "alert", `<b>Stopped by an error.</b> ${esc(doc.error)}`) : ""}
         <div class="nextsteps"><button type="button" class="cta" data-simtab-go="analytics">${icon("chart")}Explore the analysis</button><button type="button" class="btn" data-simtab-go="negotiations">Read the negotiations</button><a class="btn" href="#/report/${doc.id}">${icon("doc")}Open the report</a></div>
@@ -601,12 +603,12 @@ export function createWorkbench({ main, h, render, onCleanup, motion }) {
 
   function trialsPanel(doc) {
     if (!doc.trials.length) return empty("No negotiations finished yet", "They appear here as each one ends.");
-    return `<div class="table-wrap"><table><thead><tr><th class="num">#</th><th class="num">Seed</th><th>Condition</th><th>Seat A · Seat B</th><th>Opens</th><th>Outcome</th><th class="num">Turns</th><th class="num">Value captured</th><th class="num">Worse-off share</th></tr></thead><tbody>
+    return `<div class="table-wrap"><table><thead><tr><th class="num">#</th><th class="num">Seed</th><th>Condition</th><th>Seat A · Seat B</th><th>Opens</th><th>Outcome</th><th class="num">Turns</th><th class="num">Value created (RWE)</th><th class="num">Fairness (EW)</th></tr></thead><tbody>
       ${doc.trials.map((t) => `<tr class="link" data-trial="${t.index}" id="trial-${t.index}" tabindex="0" aria-expanded="${state.openTrial === t.index}"><td class="num">${t.index + 1}</td><td class="num">${t.seed}</td><td>${COND_NAME[t.condition] ?? esc(t.condition)}</td>
         <td>${t.seats.A} · ${t.seats.B}</td><td>${t.first_mover}</td><td>${t.status === "completed" ? `<span class="tag" style="--c:${OUT_COLOR[t.outcome]}">${esc(OUTCOME_LABEL[t.outcome] ?? t.outcome)}</span>${t.invalid_reason ? ` <span class="sub">${esc(t.invalid_reason)}</span>` : ""}` : `<span class="sub">${esc(t.status)}${t.reason ? `: ${esc(t.reason)}` : ""}</span>`}</td>
         <td class="num">${t.rounds ?? "—"}</td><td class="num">${t.rwe == null ? "—" : fmt(t.rwe)}</td><td class="num">${t.ew == null ? "—" : fmt(t.ew)}</td></tr>
         ${state.openTrial === t.index ? `<tr class="wb-detail"><td colspan="9">${trialDetail(doc, t)}</td></tr>` : ""}`).join("")}</tbody></table></div>
-      <p class="note" style="margin-top:10px">Select a row to read its transcript. Value captured (RWE) and worse-off share (EW) score failed negotiations as 0.</p>`;
+      <p class="note" style="margin-top:10px">Select a row to read its transcript. Value created (RWE) and fairness (EW) score failed negotiations as 0.</p>`;
   }
 
   function trialDetail(doc, t) {
@@ -620,14 +622,18 @@ export function createWorkbench({ main, h, render, onCleanup, motion }) {
 
   // ------------------------------------------------------------ analytics (one experiment)
   const KPI = {
-    agreement_rate: ["Agreement", "Share of negotiations that ended in an accepted offer before the deadline. All negotiations count."],
-    rwe: ["Value captured", "Relative welfare efficiency: combined value of the deal ÷ the best combined value possible (W*). Failed negotiations score 0."],
-    ew: ["Worse-off share", "Egalitarian welfare: the points of the less satisfied agent ÷ 100. Failed negotiations score 0."],
+    agreement_rate: ["Deals reached (agreement rate)", "Agreement rate: the share of negotiations that ended in an accepted offer before the deadline. All negotiations count."],
+    rwe: ["Value created (RWE)", "How much of the best possible total value the two agents achieved. Relative welfare efficiency: combined value of the deal ÷ the best combined value possible (W*). Failed negotiations score 0."],
+    ew: ["Fairness (EW)", "How well the worse-off agent did. Egalitarian welfare: the points of the less satisfied agent ÷ 100. Failed negotiations score 0."],
     rounds: ["Turns", "Mean number of turns before the negotiation ended."],
     walk_rate: ["Walk-aways", "Share of negotiations ended by an agent walking away."],
     invalid_rate: ["Invalid actions", "Share ended by an action that broke the rules (impossible split, malformed answer, illegal accept)."],
   };
   const kpiTile = (k, v) => `<div class="stat"><dt>${KPI[k][0]}<button type="button" class="hint" data-tip="${esc(KPI[k][1])}" aria-label="${esc(`${KPI[k][0]}: ${KPI[k][1]}`)}">${icon("info")}</button></dt><dd>${v}</dd></div>`;
+  /** The three numbers a first-time reader needs, in plain words; the formal name is in the label and tooltip. */
+  const keyNumbers = (doc) => { const s = summarize(doc.trials);
+    return `<section class="keynums" id="keynums" aria-label="Key results${doc.status === "running" ? " so far" : ""}"><dl class="stats">${kpiTile("agreement_rate", s.n ? pct(s.agreement_rate) : "—")}${kpiTile("rwe", s.n ? fmt(s.rwe, 2) : "—")}${kpiTile("ew", s.n ? fmt(s.ew, 2) : "—")}</dl>
+      <p class="note">${s.n ? `From ${s.n} finished negotiation${s.n === 1 ? "" : "s"}${doc.status === "running" ? " so far" : ""}. Value created and fairness run from 0 to 1, and a failed negotiation counts as 0.` : "Appears once the first negotiation finishes."}</p></section>`; };
   const kpis = (s) => `<dl class="stats">${kpiTile("agreement_rate", pct(s.agreement_rate))}${kpiTile("rwe", fmt(s.rwe, 2))}${kpiTile("ew", fmt(s.ew, 2))}${kpiTile("rounds", fmt(s.rounds, 1))}${kpiTile("walk_rate", pct(s.walk_rate))}${kpiTile("invalid_rate", pct(s.invalid_rate))}</dl>`;
 
   /** Charts built from stored trials; shared with the report. */
@@ -648,8 +654,8 @@ export function createWorkbench({ main, h, render, onCleanup, motion }) {
       scatter: chartCard("Who got what", `Each dot is one negotiation: the points ${esc(names.X)} won against the points ${esc(names.Y)} won. Dots on the dashed line split value evenly; failures sit at 0, 0. ${conds.length > 1 ? `${COND_NAME[conds[1]]} is drawn as rings, so it shows where it coincides with ${COND_NAME[conds[0]]}. ` : ""}Select a dot to read it.`,
         scatter(scat, { xLabel: `${names.X} (share of its 100 points)`, yLabel: `${names.Y} (share)`, diagonal: "equal shares" }), { lg: condLegend,
           table: dataTable(["Negotiation", "Condition", names.X, names.Y], done.map((t) => [t.index + 1, COND_NAME[t.condition], fmt(t.agents.X.utility), fmt(t.agents.Y.utility)])) }),
-      box: chartCard("Value captured by condition", "Spread of value captured (RWE). The box holds the middle half of negotiations, the line is the median, whiskers reach the rest; circles are outliers.",
-        `${boxPlot(box("rwe"), { axis: "Value captured (RWE)" })}${boxPlot(box("ew"), { axis: "Worse-off share (EW)" })}`,
+      box: chartCard("Value created by condition", "Spread of value created (RWE). The box holds the middle half of negotiations, the line is the median, whiskers reach the rest; circles are outliers.",
+        `${boxPlot(box("rwe"), { axis: "Value created (RWE)" })}${boxPlot(box("ew"), { axis: "Fairness (EW)" })}`,
         { table: dataTable(["Condition", "Measure", "n", "Median", "Mean", "Q1", "Q3"], ["rwe", "ew"].flatMap((m) => box(m).map((g) => [g.label, m.toUpperCase(), g.stats?.n ?? 0, fmt(g.stats?.median), fmt(g.stats?.mean), fmt(g.stats?.q1), fmt(g.stats?.q3)]))) }),
       area: chartCard("Outcomes as the experiment ran", "Running share of each outcome after each finished negotiation. A flat band means the pattern settled early.",
         stackedArea(cumulativeOutcomes(trials), OUTCOMES.map((o) => ({ key: o, label: OUTCOME_LABEL[o], color: OUT_COLOR[o] })), { xLabel: "Negotiations finished" }),
@@ -708,7 +714,8 @@ export function createWorkbench({ main, h, render, onCleanup, motion }) {
     if (f.view === "outcomes") {
       const c = outcomeCharts(doc, trials, names);
       body = `${filters}${kpis(summarize(trials))}<p class="note">Descriptive: these summarise what happened in this experiment and test nothing.</p>
-        <div class="cgrid">${c.donut}${c.rounds}${c.scatter}${c.box}${c.area}${c.sankey}${c.timeline}</div>`;
+        <div class="cgrid">${c.donut}${c.box}${c.scatter}${c.rounds}</div>
+        <details class="more morecharts"><summary>More charts (3)</summary><div class="cgrid">${c.area}${c.sankey}${c.timeline}</div></details>`;
     } else if (f.view === "agents") {
       const c = agentCharts(a, names);
       body = `${notice("info", "info", "Agent measures use every negotiation in this experiment; the condition filter does not apply here. Rule-based agents follow fixed rules: differences come from the situations they met, not from learning.")}
@@ -727,8 +734,8 @@ export function createWorkbench({ main, h, render, onCleanup, motion }) {
   }
   const obsEvidence = (o) => (o.evidence.length ? `<details class="more"><summary>Evidence: ${o.n > o.evidence.length ? `first ${o.evidence.length} of ${o.n}` : `${o.evidence.length}`} negotiation${o.evidence.length === 1 ? "" : "s"}</summary><p>${o.evidence.map((e) => `<button type="button" class="btn-link" data-goto="${e.trial}">#${e.trial + 1}${e.turn ? `, turn ${e.turn}` : ""}</button>`).join(" ")}</p></details>` : `<span class="sub">n=${o.n}</span>`);
 
-  const condTable = (a) => `<div class="block-head"><h2>By condition</h2><span class="note">Value captured and worse-off share count failures as 0; deal quality, evenness and envy-free use agreed negotiations only.</span></div>
-    <div class="table-wrap"><table><thead><tr><th>Condition</th><th class="num">n</th><th class="num">Agreement</th><th class="num">Value captured</th><th class="num">Worse-off share</th><th class="num">Deal quality</th><th class="num">Evenness</th><th class="num">Envy-free</th><th class="num">Invalid</th><th class="num">Turns</th></tr></thead><tbody>
+  const condTable = (a) => `<div class="block-head"><h2>By condition</h2><span class="note">Value created and fairness count failures as 0; deal quality, evenness and envy-free use agreed negotiations only.</span></div>
+    <div class="table-wrap"><table><thead><tr><th>Condition</th><th class="num">n</th><th class="num">Deals reached</th><th class="num">Value created (RWE)</th><th class="num">Fairness (EW)</th><th class="num">Deal quality</th><th class="num">Evenness</th><th class="num">Envy-free</th><th class="num">Invalid</th><th class="num">Turns</th></tr></thead><tbody>
     ${Object.entries(a.by_condition).map(([c, v]) => `<tr><td>${COND_NAME[c] ?? esc(c)}</td><td class="num">${v.n}</td><td class="num">${pct(v.agreement_rate)}</td><td class="num">${fmt(v.rwe)}</td><td class="num">${fmt(v.ew)}</td>
       <td class="num">${fmt(v.swe)} <span class="sub">n=${v.n_agreed}</span></td><td class="num">${fmt(v.equitability)}</td><td class="num">${pct(v.envy_free_rate)}</td><td class="num">${pct(v.invalid_rate)}</td><td class="num">${fmt(v.mean_rounds, 1)}</td></tr>`).join("")}</tbody></table></div>`;
 
@@ -758,7 +765,7 @@ export function createWorkbench({ main, h, render, onCleanup, motion }) {
           ${Object.entries(sc.bins).map(([bin, v]) => `<tr><td>${bin}</td><td class="num">${v.quantity_range ? `${v.quantity_range[0]}–${v.quantity_range[1]}` : "—"}</td><td class="num">${v.n}</td><td class="num">${pct(v.opening_claim_mean)}</td></tr>`).join("")}
           </tbody></table></div><p class="note">Spearman (quantity, ask): ${sc.spearman_quantity_vs_claim == null ? "undefined (no variation)" : fmt(sc.spearman_quantity_vs_claim, 2)}, n = ${sc.n}.</p>` : `<p class="note">${esc(sc.reason)}</p>`}
         <h4 class="wb-h4">Position <span class="sub">observed; points won as a share of 100, failures 0</span></h4>
-        <div class="table-wrap"><table><thead><tr><th>Role</th><th class="num">n</th><th class="num">Agreement</th><th class="num">Points won</th></tr></thead><tbody>${roleRows}</tbody></table></div>
+        <div class="table-wrap"><table><thead><tr><th>Role</th><th class="num">n</th><th class="num">Deals reached</th><th class="num">Points won</th></tr></thead><tbody>${roleRows}</tbody></table></div>
         <h4 class="wb-h4">By condition <span class="sub">observed</span></h4>
         <div class="table-wrap"><table><thead><tr><th>Condition</th><th class="num">n</th><th class="num">Opening demand</th><th class="num">Concession</th><th class="num">Points won</th></tr></thead><tbody>${condRows}</tbody></table></div></div>`;
     };
@@ -829,6 +836,7 @@ export function createWorkbench({ main, h, render, onCleanup, motion }) {
       if (tab) tab.textContent = `Negotiations (${doc.trials.length})`;
       const s = summarize(doc.trials);
       main.querySelector("#progress-text").textContent = `${doc.trials.length} of ${doc.plan_size} negotiations · ${elapsed(doc)}${s.n ? ` · ${pct(s.agreement_rate)} agreed` : ""}`;
+      main.querySelector("#keynums").outerHTML = keyNumbers(doc);
       if (doc.status !== "running") { clearInterval(timer); render(false); return; }
       if (state.simTab !== "live") { if (doc.trials.length !== prev.trials.length && !["export", "analytics"].includes(state.simTab)) paint(); return; }
       const list = main.querySelector("#live-turns");

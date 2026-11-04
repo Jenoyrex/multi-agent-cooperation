@@ -63,6 +63,7 @@ from workbench import api as workbench_api
 from workbench.agents import WorkbenchError
 
 STATIC = Path(__file__).resolve().parent / "static"
+HERO_VIDEO_PATH = "/assets/live%20wally.mp4"
 DEFAULT_HOST, DEFAULT_PORT = "127.0.0.1", 8765
 CONNECTION_TIMEOUT_S = 15  # per socket read/write of one HTTP connection (not the Agent Lab turn deadline)
 MAX_CONNECTIONS = 32       # concurrent request threads; one more connection gets 503 and is closed
@@ -189,6 +190,12 @@ class Handler(SimpleHTTPRequestHandler):
             return self._json(*workbench_api.get(url.path))
         if url.path.startswith("/api/"):
             return self._json({"error": "not found"}, 404)
+        if url.path == HERO_VIDEO_PATH and not (STATIC / "assets" / "live wally.mp4").exists():
+            # The optional local hero video never ships: answer "no content" so the page falls back to its still without a console 404.
+            self.send_response(204)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return None
         return super().do_GET()
 
     def _drain(self, length: int) -> None:

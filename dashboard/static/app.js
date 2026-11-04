@@ -1817,7 +1817,8 @@ function createPrefs() {
     const go = () => { html.dataset.theme = resolve(t); document.querySelector('meta[name="theme-color"]')?.setAttribute("content", resolve(t) === "dark" ? "#0b0b0d" : "#f5f5f7"); };
     if (!document.startViewTransition || reducedMotion() || html.dataset.theme === resolve(t)) return go();
     html.classList.add("theming");
-    document.startViewTransition(go).finished.finally(() => html.classList.remove("theming"));
+    const vt = document.startViewTransition(go); vt.ready.catch(() => {}); // an aborted transition still paints the theme
+    vt.finished.catch(() => {}).finally(() => html.classList.remove("theming"));
   };
   dark.addEventListener("change", () => { if (read("theme", "system") === "system") paint("system"); });
   const prefs = {

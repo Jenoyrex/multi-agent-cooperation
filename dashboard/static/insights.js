@@ -55,19 +55,19 @@ export function createInsights({ main, h, render, wb, prefs }) {
   function hubView({ sims, docs }) {
     const all = docs.flatMap((d) => d.trials), pooled = summarize(all);
     const rows = docs.map((d) => ({ d, s: summarize(d.trials) }));
-    const series = [["agreement_rate", "Agreement", "var(--base)"], ["rwe", "Value captured", "var(--struct)"], ["ew", "Worse-off share", "var(--claude)"]];
+    const series = [["agreement_rate", "Deals reached", "var(--base)"], ["rwe", "Value created", "var(--struct)"], ["ew", "Fairness", "var(--claude)"]];
     const bars = groupedBars(rows.map(({ d, s }) => ({ label: short(d.config.name), bars: series.map(([k, l, c]) => ({ key: k, label: l, v: s[k], color: c, tip: `${d.config.name}\n${l}: ${k === "agreement_rate" ? pct(s[k]) : fmt(s[k], 2)} (n = ${s.n})` })) })));
     const mix = stackBars(rows.map(({ d, s }) => ({ label: short(d.config.name, 15), n: s.n, parts: OUTCOMES.map((o) => ({ key: o, count: s.outcomes[o], share: s.n ? s.outcomes[o] / s.n : 0, color: OUT_COLOR[o], ink: o === "agreed" || o === "invalid_action" ? "var(--panel)" : "var(--ink)" })) })));
-    const box = boxPlot(rows.map(({ d }, i) => ({ key: d.id, label: short(d.config.name, 18), color: i % 2 ? "var(--struct)" : "var(--base)", stats: boxStats(completedTrials(d.trials).map((t) => t.rwe)) })), { axis: "Value captured (RWE) per negotiation" });
+    const box = boxPlot(rows.map(({ d }, i) => ({ key: d.id, label: short(d.config.name, 18), color: i % 2 ? "var(--struct)" : "var(--base)", stats: boxStats(completedTrials(d.trials).map((t) => t.rwe)) })), { axis: "Value created (RWE) per negotiation" });
     const simulatedOnly = docs.every((d) => d.config.data_kind === "simulated");
     return `${notice("info", "info", `<b>Pooled and descriptive.</b> These totals mix experiments with different agents, resources and designs, so they describe your work so far; they are not a test of anything.${simulatedOnly ? " Every experiment here used rule-based agents: the data is simulated." : ""}${sims.filter((s) => s.done > 0).length > MAX_POOLED ? ` Showing the newest ${MAX_POOLED} experiments.` : ""}`)}
       <dl class="stats">${[["Experiments", docs.length], ["Negotiations", pooled.n]].map(([k, v]) => `<div class="stat"><dt>${k}</dt><dd>${v}</dd></div>`).join("")}</dl>
       <div style="margin-top:12px">${kpis(pooled)}</div>
-      <div class="cgrid">${chartCard("Key measures by experiment", "Agreement rate, mean value captured and mean worse-off share for each experiment. Use the legend to show or hide a measure.", bars,
-        { wide: true, lg: toggleLegend(series.map(([k, l, c]) => [k, l, c])), table: dataTable(["Experiment", "n", "Agreement", "Value captured", "Worse-off share", "Turns"], rows.map(({ d, s }) => [d.config.name, s.n, pct(s.agreement_rate), fmt(s.rwe, 3), fmt(s.ew, 3), fmt(s.rounds, 1)])) })}
+      <div class="cgrid">${chartCard("Key measures by experiment", "Agreement rate, mean value created and mean fairness for each experiment. Use the legend to show or hide a measure.", bars,
+        { wide: true, lg: toggleLegend(series.map(([k, l, c]) => [k, l, c])), table: dataTable(["Experiment", "n", "Deals reached", "Value created (RWE)", "Fairness (EW)", "Turns"], rows.map(({ d, s }) => [d.config.name, s.n, pct(s.agreement_rate), fmt(s.rwe, 3), fmt(s.ew, 3), fmt(s.rounds, 1)])) })}
         ${chartCard("Outcome mix", "How each experiment's negotiations ended.", mix, { lg: `<div class="legend">${OUTCOMES.map((o) => `<span><i class="sw" style="--c:${OUT_COLOR[o]}"></i>${OUTCOME_LABEL[o]}</span>`).join("")}</div>` })}
-        ${chartCard("Spread of value captured", "Each row is one experiment: the box holds its middle half of negotiations, the line its median.", box)}</div>
-      ${section("Experiments", "Select one for its full analysis.", `<div class="table-wrap"><table><thead><tr><th>Experiment</th><th>Data</th><th class="num">n</th><th class="num">Agreement</th><th class="num">Value captured</th><th class="num">Worse-off share</th><th class="num">Turns</th><th>Status</th></tr></thead><tbody>
+        ${chartCard("Spread of value created", "Each row is one experiment: the box holds its middle half of negotiations, the line its median.", box)}</div>
+      ${section("Experiments", "Select one for its full analysis.", `<div class="table-wrap"><table><thead><tr><th>Experiment</th><th>Data</th><th class="num">n</th><th class="num">Deals reached</th><th class="num">Value created (RWE)</th><th class="num">Fairness (EW)</th><th class="num">Turns</th><th>Status</th></tr></thead><tbody>
         ${rows.map(({ d, s }) => `<tr class="link" data-href="#/simulation/${d.id}"><td><a href="#/simulation/${d.id}">${esc(d.config.name)}</a><div class="sub">${esc(d.config.agents.X.name)} vs ${esc(d.config.agents.Y.name)} · ${esc(d.config.environment.name)}</div></td>
           <td>${d.config.data_kind === "simulated" ? "Simulated" : "Local agents"}</td><td class="num">${s.n}</td><td class="num">${pct(s.agreement_rate)}</td><td class="num">${fmt(s.rwe)}</td><td class="num">${fmt(s.ew)}</td><td class="num">${fmt(s.rounds, 1)}</td><td>${statusBadge(d.status)}</td></tr>`).join("")}</tbody></table></div>`)}`;
   }
@@ -91,10 +91,10 @@ export function createInsights({ main, h, render, wb, prefs }) {
       ${notice("warn", "alert", `<b>Exploratory comparison.</b> ${A.id === B.id ? "Both sides are the same experiment." : diffs.length ? `These experiments differ in ${diffs.join(", ")}, so a difference below may come from any of them.` : "Same agents, resources, conditions and seeds."} Differences are descriptive; no test is run, and nothing here says why they differ.`)}
       <div class="table-wrap"><table><thead><tr><th>Measure</th><th class="num">A · ${esc(short(A.config.name, 22))}</th><th class="num">B · ${esc(short(B.config.name, 22))}</th><th class="num">B − A</th></tr></thead><tbody>
         <tr><td>Negotiations</td><td class="num">${sa.n}</td><td class="num">${sb.n}</td><td class="num">—</td></tr>
-        ${row("Agreement", "agreement_rate", (v) => pct(v, 1))}${row("Value captured (mean RWE)", "rwe", (v) => fmt(v, 3))}${row("Worse-off share (mean EW)", "ew", (v) => fmt(v, 3))}
+        ${row("Agreement", "agreement_rate", (v) => pct(v, 1))}${row("Value created (mean RWE)", "rwe", (v) => fmt(v, 3))}${row("Fairness (mean EW)", "ew", (v) => fmt(v, 3))}
         ${row("Turns (mean)", "rounds", (v) => fmt(v, 2))}${row("Walk-aways", "walk_rate", (v) => pct(v, 1))}${row("Invalid actions", "invalid_rate", (v) => pct(v, 1))}</tbody></table></div>
-      <div class="cgrid">${chartCard("Value captured", "Distribution per negotiation in each experiment.", box("rwe", "Value captured (RWE)"))}
-        ${chartCard("Worse-off share", "Distribution per negotiation in each experiment.", box("ew", "Worse-off share (EW)"))}
+      <div class="cgrid">${chartCard("Value created", "Distribution per negotiation in each experiment.", box("rwe", "Value created (RWE)"))}
+        ${chartCard("Fairness", "Distribution per negotiation in each experiment.", box("ew", "Fairness (EW)"))}
         ${chartCard("Outcome mix", "How each experiment's negotiations ended.", mix, { lg: `<div class="legend">${OUTCOMES.map((o) => `<span><i class="sw" style="--c:${OUT_COLOR[o]}"></i>${OUTCOME_LABEL[o]}</span>`).join("")}</div>` })}</div>
       <p class="note" style="margin-top:16px">To compare the two instruction conditions or the two agents inside one experiment, open it: its analysis filters by condition and profiles each agent. <a href="#/simulation/${B.id}">Open B</a> · <a href="#/simulation/${A.id}">Open A</a></p>`;
   }

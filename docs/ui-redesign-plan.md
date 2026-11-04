@@ -128,3 +128,5 @@ checkout (Windows `core.autocrlf`) the browser blocked the script and dark mode 
 now normalises newlines the way the HTML parser does, and there is a new test. Verified: 22 old routes open
 the right page with the right nav item; 6 pages × 3 viewports × 2 themes show no overflow and nav/Settings
 are visible at 1280×666. The only console error is the known video 404. pytest 620, node 20.
+
+**Loop 2: finished on `sandbox-v2`.** The uncommitted key-numbers and wizard work from `ui-simplify` was carried over and committed here. Console errors cleared without removing the video: the server answers 204 when the optional hero video is absent, and aborted theme transitions no longer reject. Verified: 19 routes x 3 viewports x 2 themes, no overflow and no console errors; sample experiment reaches key numbers from Home in one click. pytest 620, node 20. Frozen files unchanged.
