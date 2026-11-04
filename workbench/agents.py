@@ -92,6 +92,8 @@ class Param:
     min: Optional[float] = None
     max: Optional[float] = None
     choices: tuple = ()
+    max_len: int = 200
+    optional: bool = False
 
 
 @dataclass(frozen=True)
@@ -140,7 +142,37 @@ def _http_check(p: dict) -> None:
 
 def _http_build(name: str, p: dict, variant: str) -> Agent:
     from lab.adapters import HTTPAgent  # local import: the Lab is only needed for this kind
+    from sandbox import policy
+    policy.require_local("Calling an HTTP agent")
     return HTTPAgent(p["url"], name, variant, timeout_s=p["timeout_s"])
+
+
+def _remote_check(p: dict) -> None:
+    from sandbox import policy
+    u = urlparse(p["url"])
+    if u.scheme not in ("http", "https") or not u.hostname or u.username or u.password:
+        raise WorkbenchError("Use a full http:// or https:// URL, without credentials in it.", "params.url")
+    if u.hostname in LOOPBACK:
+        raise WorkbenchError("That address is on this computer. Use a Local HTTP agent for it.", "params.url")
+    policy.require_local("A remote HTTP agent")
+
+
+def _remote_build(name: str, p: dict, variant: str) -> Agent:
+    from lab.adapters import HTTPAgent
+    from sandbox import policy
+    policy.require_local("Calling a remote HTTP agent")
+    return HTTPAgent(p["url"], name, variant, timeout_s=p["timeout_s"], allow_remote=True)
+
+
+def _prompt_check(p: dict) -> None:
+    from sandbox import policy, providers
+    policy.require_local("A prompt agent")
+    providers.require(p["connection"])
+
+
+def _prompt_build(name: str, p: dict, variant: str) -> Agent:
+    from sandbox.model_agent import build
+    return build(name, p, variant)
 
 
 LOCKED = ("Locked by zero-cost mode: real provider calls cost money, so this project never makes them. "
@@ -180,6 +212,29 @@ KINDS = {k.id: k for k in (
          False, "Inspected, not executed: this server has no isolated sandbox for uploaded Python. To run your agent, "
                 "serve it yourself on this machine and add it as a Local HTTP agent (see lab/example_http_agent.py).",
          reads_instructions=False, deterministic=False),
+    Kind("prompt", "Prompt agent (no coding)", "model",
+         "Choose a model and write the agent's instructions. It sees what a study agent sees (the public pool, its own values, the "
+         "transcript), plus your instructions; never the other agent's values.",
+         (Param("connection", "Model connection", "text", "ollama", "Where the model runs: a local server, or a provider with your own key."),
+          Param("model", "Model", "text", "", "The model's name on that connection."),
+          Param("persona", "Instructions / personality", "text", "", "Added to the agent's rules. Leave empty for none.", max_len=4000, optional=True),
+          Param("temperature", "Temperature", "number", None, "Leave empty to use the provider's default (some models refuse other values).", 0, 2, optional=True),
+          Param("max_output_tokens", "Longest reply (tokens)", "number", 400, "A reply cut off at this length counts as an invalid action.", 16, 8000),
+          Param("timeout_s", "Timeout per turn (s)", "number", 60, "A turn that takes longer ends that negotiation as aborted, not as an outcome.", 1, 600)),
+         True, reads_instructions=True, deterministic=False, cost="free locally; with an API key, you pay your provider",
+         build=_prompt_build, check=_prompt_check),
+    Kind("http_remote", "Remote HTTP agent", "http",
+         "Your own agent behind an HTTP or HTTPS URL on another machine, speaking the Agent Lab protocol. Each turn sends that agent's own view "
+         "to that server, so it asks for your consent before an experiment runs. No token is stored.",
+         (Param("url", "Endpoint URL", "text", "https://example.org/turn", "A URL on another machine. Use a Local HTTP agent for this computer."),
+          Param("timeout_s", "Timeout per turn (s)", "number", 20, "Seconds to wait for each answer.", 1, 60)),
+         True, reads_instructions=True, deterministic=False, cost="whatever that server charges you", build=_remote_build, check=_remote_check),
+    Kind("python_file", "Python file (runs on your computer)", "upload",
+         "Your own .py file, run in its own process on this computer after you confirm. The process gets a clean environment with no API keys and a "
+         "time limit per turn, but it runs with your permissions and could read your files. Only run files you trust.",
+         (Param("class_name", "Agent class", "text", "", "The class in your file that implements generate_response."),
+          Param("timeout_s", "Timeout per turn (s)", "number", 10, "The process is stopped if a turn takes longer.", 1, 120)),
+         True, reads_instructions=False, deterministic=False),
     Kind("claude", "Claude (Anthropic)", "provider", "Provider adapter: src.agents.claude_agent.ClaudeAgent with the approved runtime.",
          (_model("ClaudeAgent"),), False, LOCKED, reads_instructions=True, deterministic=False, cost="paid"),
     Kind("openai", "GPT (OpenAI)", "provider", "Provider adapter: src.agents.openai_agent.OpenAIAgent with the approved runtime.",
@@ -191,6 +246,9 @@ KINDS = {k.id: k for k in (
 )}
 
 MODEL_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$")
+SERVER_MODEL_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,127}$")  # names a server reports, such as org/model:tag
+LOCAL_ONLY = frozenset({"http_local", "http_remote", "prompt", "python_file"})  # never in the public demo
+UPLOAD_KINDS = frozenset({"python_upload", "python_file"})
 NAME_MAX, NOTES_MAX = 60, 500
 
 
@@ -217,6 +275,9 @@ def validate(doc) -> dict:
     for p in kind.params:
         v = raw.get(p.name, p.default)
         where = f"params.{p.name}"
+        if p.optional and v in (None, ""):
+            params[p.name] = None if p.type == "number" else ""
+            continue
         if p.type == "number":
             if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) or not p.min <= v <= p.max:
                 raise WorkbenchError(f"{p.label} must be a number from {p.min:g} to {p.max:g}.", where)
@@ -226,15 +287,18 @@ def validate(doc) -> dict:
                 raise WorkbenchError(f"{p.label} must be one of: {', '.join(p.choices)}.", where)
         else:
             v = str(v).strip()
-            if p.name == "model" and not MODEL_ID.match(v):
+            if p.name == "model" and kind.id == "prompt":
+                if not SERVER_MODEL_ID.match(v):
+                    raise WorkbenchError(f"{p.label}: choose a model name, using letters, digits and . _ : / @ + - (at most 128).", where)
+            elif p.name == "model" and not MODEL_ID.match(v):
                 raise WorkbenchError(f"{p.label}: use letters, digits, '.', '_', ':' or '-' (at most 64).", where)
-            if not v or len(v) > 200:
-                raise WorkbenchError(f"{p.label} is required (at most 200 characters).", where)
+            if len(v) > p.max_len or (not v and not p.optional):
+                raise WorkbenchError(f"{p.label} is required (at most {p.max_len} characters).", where)
         params[p.name] = v
     if kind.check:
         kind.check(params)
     clean = {"name": name, "kind": kind.id, "params": params, "notes": notes}
-    if kind.id == "python_upload":  # the server re-inspects the file; a client-side report is never trusted
+    if kind.id in UPLOAD_KINDS:  # the server re-inspects the file; a client-side report is never trusted
         from workbench.inspect_agent import inspect_source
         up = doc.get("upload")
         if not isinstance(up, dict):
@@ -252,6 +316,9 @@ def build(defn: dict, display_name: str, variant: str) -> Agent:
     kind = KINDS[defn["kind"]]
     if not kind.executable:
         raise WorkbenchError(f"{defn['name']} ({kind.label}) cannot run: {kind.reason}", "agents")
+    if kind.id == "python_file":
+        from sandbox.python_agent import PythonFileAgent
+        return PythonFileAgent(display_name, defn["upload"]["source"], defn["params"]["class_name"], defn["params"]["timeout_s"])
     return kind.build(display_name, defn["params"], variant)
 
 

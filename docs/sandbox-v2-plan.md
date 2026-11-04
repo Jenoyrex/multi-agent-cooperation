@@ -53,8 +53,7 @@ gain small hooks only.
 | `sandbox/model_agent.py` | `PromptAgent`: AgentView + persona to provider, strict parse |
 | `sandbox/python_agent.py`, `sandbox/python_runner.py` | Parent and child of the Python file subprocess |
 | `sandbox/engine.py` | `sandbox_v1` engine, used only for experiments with resource events |
-| `sandbox/experiment.py` | Sweep, event, persona, price and cap validation; data source labels; budget |
-| `sandbox/consent.py` | Token/cost estimate and consent token |
+| `sandbox/experiment.py` | Sweep, event, persona, price and cap validation; data source labels; estimate; consent token; budget |
 | `sandbox/analysis.py` | Behaviour profiles, reactions, sweep comparison, findings |
 | `sandbox/api.py` | `/api/models/*` routes and the estimate route |
 | `dashboard/static/sandboxui.js` | Connections page, Run-it-yourself page, consent panel, analysis panel |
@@ -145,3 +144,14 @@ its environment, but it could read files the user can read, including `.env`. Th
 None yet.
 
 ## Loop notes
+
+**Loop 0: plan.** This document. Provider docs checked; two departures from the study agents recorded above.
+
+**Loop 1: installable app.** `cooperation-lab` entry point, home data folder, packaging fixed (the old config could not
+ship `src.*`). Verified in a fresh venv: `pip install .`, command starts on 127.0.0.1, health 200, static files and
+experiments work, data lands in the data folder, uninstall removes the command. Not verified on macOS or Linux (no such
+machine here). `pip install git+https://...` needs the branch pushed, so it was tested from the local path.
+
+**Loops 2 to 4: models, agents, resources (backend).** Committed together because the modules depend on one another.
+Fake-server and stub tests cover local and BYO-key agents, test connection, 401/429/timeout/malformed output, caps,
+consent, key leaks, all agent types, privacy, the demo lockout, events and sweeps. pytest 692 at this point. UI comes in Loop 6.

@@ -12,10 +12,12 @@ import uuid
 from pathlib import Path
 from typing import Optional
 
+from sandbox.keys import redact
+
 ROOT = Path(__file__).resolve().parents[1]
 DB_PATH = ROOT / "sandbox_runs" / "workbench.db"  # tests point this at a temporary file
 STATUSES = ("running", "completed", "cancelled", "failed", "interrupted")
-TABLES = ("agents", "environments", "simulations")
+TABLES = ("agents", "environments", "simulations", "connections")
 SCHEMA = f"""
 CREATE TABLE IF NOT EXISTS agents (id TEXT PRIMARY KEY, created REAL NOT NULL, updated REAL NOT NULL,
     doc TEXT NOT NULL CHECK (json_valid(doc)));
@@ -23,6 +25,8 @@ CREATE TABLE IF NOT EXISTS environments (id TEXT PRIMARY KEY, created REAL NOT N
     doc TEXT NOT NULL CHECK (json_valid(doc)));
 CREATE TABLE IF NOT EXISTS simulations (id TEXT PRIMARY KEY, created REAL NOT NULL, updated REAL NOT NULL,
     status TEXT NOT NULL CHECK (status IN ({", ".join(f"'{s}'" for s in STATUSES)})),
+    doc TEXT NOT NULL CHECK (json_valid(doc)));
+CREATE TABLE IF NOT EXISTS connections (id TEXT PRIMARY KEY, created REAL NOT NULL, updated REAL NOT NULL,
     doc TEXT NOT NULL CHECK (json_valid(doc)));
 """
 _lock = threading.Lock()
@@ -56,7 +60,7 @@ def put(table: str, doc: dict) -> dict:
         conn = _conn()
         try:
             cols = "id, created, updated, doc" + (", status" if table == "simulations" else "")
-            vals = [doc["id"], doc["created"], now, json.dumps(doc)] + ([doc["status"]] if table == "simulations" else [])
+            vals = [doc["id"], doc["created"], now, redact(json.dumps(doc))] + ([doc["status"]] if table == "simulations" else [])
             conn.execute(f"INSERT OR REPLACE INTO {table} ({cols}) VALUES ({', '.join('?' * len(vals))})", vals)
             conn.commit()
         finally:
