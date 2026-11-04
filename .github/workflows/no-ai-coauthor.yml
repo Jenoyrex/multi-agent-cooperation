@@ -1,0 +1,28 @@
+name: No AI co-author
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    name: No AI co-author
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Fail if any commit message has AI attribution
+        run: |
+          if git log --format=%B | LC_ALL=C grep -iE \
+            -e 'co-authored-by:.*(claude|anthropic)' \
+            -e 'co-authored-by:.*\b(copilot|cursor|cursoragent|chatgpt|openai|codeium|windsurf)\b' \
+            -e 'co-authored-by:.*(gemini-(cli|code-assist)|devin-ai|@cognition\.ai|@devin\.ai|@aider\.chat)' \
+            -e 'co-authored-by:[[:space:]]*(google[[:space:]]+)?gemini([[:space:]]*<|[[:space:]]+(ai|cli|code|[0-9]))' \
+            -e 'co-authored-by:[[:space:]]*(devin[[:space:]]+ai\b|aider[[:space:]]*[(<])' \
+            -e '^[^[:alnum:]]*(this[[:space:]].*[[:space:]])?generated[[:space:]]+(with|by)[[:space:]]+[^[:alnum:]]*((the|github|google)[[:space:]]+)?(claude|anthropic|copilot|cursor|chatgpt|openai|gemini|codeium|windsurf|aider|devin)\b' \
+            -e 'generated with \[?claude code' \
+            -e '🤖 generated (with|by)'; then
+            echo "::error::Found AI attribution in the commit history"
+            exit 1
+          fi
