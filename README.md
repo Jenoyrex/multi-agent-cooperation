@@ -1,5 +1,25 @@
 # Multi-Agent Cooperation: Resource-Split Negotiation Game
 
+## Install and run on your own computer
+
+Needs Python 3.10 or newer. Works the same on Windows, macOS and Linux.
+
+```bash
+python -m venv .venv
+# Windows:        .venv\\Scripts\\activate
+# macOS / Linux:  source .venv/bin/activate
+pip install git+https://github.com/Jenoyrex/multi-agent-cooperation
+cooperation-lab
+```
+
+The app starts on `http://127.0.0.1` and opens your browser. Options: `--port 9000`, `--no-browser`, and `--host` (only if
+you really want other machines to reach it). Your data stays in `~/.cooperation-lab`, or wherever `COOPERATION_LAB_HOME` points.
+
+**Free local models (optional).** Install one, and the app finds it on this computer:
+
+- [Ollama](https://ollama.com): after installing, run `ollama pull llama3.2`. Default address `http://localhost:11434/v1`.
+- [LM Studio](https://lmstudio.ai): load a model and start its local server. Default address `http://localhost:1234/v1`.
+
 ## Live demo
 
 **Live demo: _not deployed yet_.** The link is added here once the Render service is live and has been checked.
