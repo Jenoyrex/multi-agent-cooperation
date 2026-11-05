@@ -1,4 +1,12 @@
-# Multi-Agent Cooperation: Resource-Split Negotiation Game
+# Cooperation Lab
+
+This repository holds two separate things:
+
+- **The sandbox platform**: an open AI-agent sandbox you install and run on your own computer. Bring your own agents, add
+  resources, run experiments, and get honest analysis of how the agents behave, negotiate and share. Everything from
+  here to "The research study" describes it.
+- **[The research study](#the-research-study)**: a preregistered study of Claude and GPT, frozen and separate. It has not
+  been run. Sandbox results are exploratory and are never the study's results.
 
 ## Install and run on your own computer
 
@@ -6,7 +14,7 @@ Needs Python 3.10 or newer. Works the same on Windows, macOS and Linux.
 
 ```bash
 python -m venv .venv
-# Windows:        .venv\\Scripts\\activate
+# Windows:        .venv\Scripts\activate
 # macOS / Linux:  source .venv/bin/activate
 pip install git+https://github.com/Jenoyrex/multi-agent-cooperation
 cooperation-lab
@@ -20,13 +28,56 @@ you really want other machines to reach it). Your data stays in `~/.cooperation-
 - [Ollama](https://ollama.com): after installing, run `ollama pull llama3.2`. Default address `http://localhost:11434/v1`.
 - [LM Studio](https://lmstudio.ai): load a model and start its local server. Default address `http://localhost:1234/v1`.
 
-## Live demo
+## What you can do
+
+- **Import agents three ways.** A prompt agent (choose a model and write its instructions, no coding), your own service
+  at an HTTP URL, or a Python file that runs on your computer after you confirm.
+- **Connect models.** Free local models through Ollama or LM Studio, or your own key for OpenAI, Anthropic, Google Gemini or
+  any OpenAI-compatible provider such as Groq or OpenRouter. "Test connection" sends one tiny request, only when you click it.
+- **Compare resource sets.** The same agents and seeds on several sets, and optionally several personas.
+- **Add a resource mid-negotiation** and see how each agent reacts ([protocol](docs/sandbox-protocol.md)).
+- **Read a behaviour profile** of each agent: opening demand, concession speed, share of value, fairness of its offers, how
+  often it walks away or breaks the rules, turns to agreement, whether its messages reveal preferences, and how its
+  demands change after a resource event ([definitions](docs/sandbox-metrics.md)).
+- **Trust the numbers as far as they go.** Repetitions, seeds, 95% intervals, sample sizes, tokens and cost per run. Findings
+  in plain words never claim more than the data shows. Exports (CSV, JSON, Markdown) carry the data source label.
+
+## Privacy and cost
+
+- **Local by default.** The server binds to 127.0.0.1 unless you pass `--host`. Your experiments stay in your data folder.
+- **Keys** are entered in the app, or read from the environment or a local `.env` (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`,
+  `GEMINI_API_KEY`). Keys entered in the app stay in memory until you close it. They are never written to the database,
+  exports, reports or logs, and never sent back to the browser, which shows only `sk-…abcd`. Key routes answer only this
+  computer, same-origin.
+- **You pay your provider directly.** With an API key, you first see a token estimate and a cost from prices you enter (the app
+  never guesses prices), set a hard token cap, and confirm "Run (uses your API key, you pay)". Your agent's turns go
+  to that provider, under its terms. The estimate is rough, and your provider's bill is the real figure.
+- **Python files are not sandboxed from your computer.** Each runs in its own process with no API keys in its environment and
+  a time limit per turn, but with your permissions: it could read your files, including `.env`. Only run files you trust.
+
+## Limitations
+
+- Two agents per negotiation. Labels and profiles are keyed so this can grow; three or more is not built.
+- Prompt agents have been tested against a fake OpenAI-compatible server and a stub Anthropic client only. No real model, local
+  or paid, has been run by the project, so provider-specific problems may remain. Use "Test connection" first.
+- Structured output depends on the model. A reply that isn't valid JSON for the action format is recorded as `invalid_action`, never
+  repaired, so a weak model can show a high rule-breaking rate.
+- A sandbox experiment is not a controlled study. Models change, and a prompt agent's run may not repeat exactly.
+- Install tested on Windows only; macOS and Linux are expected to work but have not been run.
+- The install puts top-level packages named `src`, `lab`, `dashboard`, `workbench` and `sandbox` on your path, so use a virtual environment.
+
+## Public demo
 
 **Live demo: _not deployed yet_.** The link is added here once the Render service is live and has been checked.
 
 [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/Jenoyrex/multi-agent-cooperation)
 
-**Cooperation Lab** is an experimental research platform for multi-agent negotiation. You configure agents,
+The public site (`PUBLIC_DEMO=1`) is a safe free demo: rule-based agents only, no keys, no model calls, no code execution, clearly
+labelled, with a "Download and run it yourself" page.
+
+## The research study
+
+**Cooperation Lab** began as an experimental research platform for multi-agent negotiation. You configure agents,
 define the resources they divide and how much each agent privately values them, run experiments on a
 fixed negotiation engine, watch them live, and explore automatically computed behavioural analytics.
 Alongside it sits a preregistered research study comparing Claude and GPT, shown read-only.
@@ -193,14 +244,11 @@ and never starts or changes a run. Full-run results stay locked until all
 480 negotiations exist (spec §8.9). No inferential statistics are shown,
 because the §8.9 analysis has not been implemented yet.
 
-## Workbench (exploratory, zero cost)
+## Workbench (exploratory)
 
 The dashboard opens on **Start**, a guided path through the **Workspace**: Agents, Resources, Experiments,
-Analytics and Reports. You add agents (built-in strategies, locked AI providers, or an uploaded `.py` file that is
-inspected but never executed), define resources, run designed experiments on the unchanged engine through a
-step-by-step wizard, follow them live, explore interactive behavioural analytics, compare experiments, and save
-reports as PDF or export CSV/JSON. Light, dark and system themes are in **Settings**. Rule-based and Python
-agents run locally at no cost; Claude, GPT and Gemini entries are configurable but locked. Rule-based runs are labelled simulated, runs with your local HTTP agents are labelled local agents, and both are stored in `sandbox_runs/`, never `results/`.
+Analytics and Reports. Every experiment is labelled by what ran ("Rule-based (simulated)", "Local model: name", "API model:
+provider/model") and is stored away from the study's `results/`. The study's own Claude, GPT and Gemini configurations stay locked.
 See [docs/workbench.md](docs/workbench.md).
 
 Zero-cost end-to-end demo: `PYTHONPATH=. py scripts/run_workbench_demo.py`. The preregistered §8.9 analysis is
@@ -220,8 +268,8 @@ negotiations) on the same scripted agents. What it is not:
 - **Not an AI evaluation.** No AI provider is called and no API key is
   used. Scripted agents follow fixed rules and ignore the instructions,
   so their numbers show how the lab measures a negotiation, not how any
-  model negotiates. Claude, GPT and your own HTTP agents run only in the
-  full lab, on a local server with its own configuration.
+  model negotiates. Models, your API keys, HTTP agents and Python files run
+  only in the app on your own computer.
 - **Not persistent.** Only the newest 100 runs of each kind are kept,
   on the server's local disk; on a host whose disk is wiped on restart
   (such as a free Render instance) they disappear with every restart.
@@ -230,7 +278,8 @@ negotiations) on the same scripted agents. What it is not:
   run and no agent is ranked.
 
 The server enforces all of this itself, whatever the page sends: scripted
-agents only, no connection probe, at most 20 run starts per minute for
+agents only, no connection probe, no key or model routes, no code
+execution, no non-loopback calls, at most 20 run starts per minute for
 the whole server, and no technical error detail in responses
 (`dashboard/demo.py`). The research views are unchanged and still show
 only real experiment data (none has been collected yet).

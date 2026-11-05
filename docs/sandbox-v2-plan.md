@@ -1,6 +1,6 @@
 # Sandbox v2 plan: Cooperation Lab as an open, local AI-agent sandbox
 
-Status: in progress on branch `sandbox-v2` (worktree `../mini-project-sandbox`). Nothing is pushed.
+Status: exit checks met on branch `sandbox-v2` (worktree `../mini-project-sandbox`). Nothing is pushed.
 
 Branch note: `sandbox-v2` starts from `ui-simplify` (f6c8a5e). `ui-simplify` had uncommitted Loop 2 work and unticked
 exit checks. Commits were requested on `sandbox-v2` only, so that work was copied here and finished here. The
@@ -8,7 +8,7 @@ exit checks. Commits were requested on `sandbox-v2` only, so that work was copie
 
 ## a) Features
 
-Ticks and tests are filled in as each loop lands (see "Feature table" at the end).
+Each feature's location and test are in the "Feature table" at the end.
 
 | ID | Feature |
 |---|---|
@@ -129,15 +129,15 @@ its environment, but it could read files the user can read, including `.env`. Th
 
 ## e) Acceptance checklist (= exit checks)
 
-- [ ] Every S-feature ticked with location and test
-- [ ] `pip install` + `cooperation-lab` works in a fresh venv; binds 127.0.0.1 by default
-- [ ] Local-model, BYO-key (fake server), prompt, HTTP and Python agents complete a negotiation in tests
-- [ ] No key in DB, exports, logs or browser responses (test)
-- [ ] PUBLIC_DEMO=1: no model, key, Python or non-loopback feature can run (tests)
-- [ ] Resource events, sweeps and behaviour profiles work, with documented definitions and CI/n shown
-- [ ] `git diff --stat main...sandbox-v2 -- docs/spec.md src/` is empty
-- [ ] All tests pass; no console errors; no overflow at 390 px
-- [ ] Zero paid API calls
+- [x] Every S-feature ticked with location and test
+- [x] `pip install` + `cooperation-lab` works in a fresh venv; binds 127.0.0.1 by default (Windows; from the local path)
+- [x] Local-model, BYO-key (fake server), prompt, HTTP and Python agents complete a negotiation in tests
+- [x] No key in DB, exports, logs or browser responses (test)
+- [x] PUBLIC_DEMO=1: no model, key, Python or non-loopback feature can run (tests)
+- [x] Resource events, sweeps and behaviour profiles work, with documented definitions and CI/n shown
+- [x] `git diff --stat main...sandbox-v2 -- docs/spec.md src/` is empty
+- [x] All tests pass; no console errors; no overflow at 390 px
+- [x] Zero paid API calls
 
 ## Blockers
 
@@ -158,4 +158,59 @@ consent, key leaks, all agent types, privacy, the demo lockout, events and sweep
 
 **Loop 5: analysis (backend).** Behaviour profiles, event reactions, sweep comparison, findings, labelled exports; chart numbers recomputed from `metrics.csv` in a test. pytest 703, node 20.
 
-**Status: stopped partway, usage limit reached.** Loops 6 and 7 are NOT done. `dashboard/static/sandboxui.js` is written but not wired in, has never run, and imports helpers (`designSize`, `simBody`, `fmtCI`, `sourceSummary`) not yet in `lib.js`. Nothing loads it, so the app is unaffected. Until Loop 6 lands, the new backend features have no UI, and the UI still says keys are never entered and providers are locked. Exit checks and the feature table are not ticked. Known gap: `provenance.zero_cost_mode` still reads true for API-key runs, and `report.md` repeats it; fix before release.
+**Loop 6: UI and public site.** Six-item nav (Agents & models), Model connections page, prompt/HTTP/Python agent flows, sweep,
+event and persona editors, consent panel on Review, behaviour profile, comparison and reaction views, report sections, Run-it-yourself
+page, demo lockouts. Verified in headless Chromium: four journeys (local model; BYO key to consent and run; sweep + event to
+analysis and report; Python file with consent), 17 routes x 3 viewports x 2 themes, analysis views at 390 px and 1280x666, demo
+routes. Fixed along the way: a console 400 on an empty model, wrong copy, a clipped price column.
+
+**Loop 7: docs and safety review.** README split, docs/workbench.md, Help glossary. Read-only review of keys, consent, demo lockout,
+subprocess and binding found and fixed:
+
+- A remote HTTP URL could carry a secret in its query string into reports and exports. Refused now.
+- A client on another machine (with `--host`) could save a Python file for the local user to run later. Saving is local only now.
+- Report and provenance said zero-cost mode was on for API-key runs. Corrected, and the report no longer says no LLM was run.
+- The CLI never set the `.env` search folder, and an installed app had no Agent Lab secret. Both fixed.
+
+Left as stated limits, not bugs: a Python file runs with the user's permissions (it could read `.env`), which the consent text says;
+stopping one kills that process but not any children it started; `--host` exposes saved experiments, including Python source, to
+anyone who can reach the port, which the CLI warns about.
+
+## Known unverified
+
+- **No real model has been run.** Ollama and LM Studio are not on this machine, and no paid call was made.
+- **Ollama:** its docs confirm `response_format` but do not name `json_schema`. If a model misbehaves, a custom connection can use JSON mode.
+- **Gemini:** docs show structured output through the SDK's `parse` helper; the wire format and `max_tokens` were not confirmed by a real call.
+- **macOS and Linux** install: not run. **`pip install git+https://...`**: needs a push; the same install was tested from the local path.
+- **Chrome extension** was not connected, so browser checks used headless Chromium over CDP.
+
+## Feature table
+
+| ID | Feature | Location | Test |
+|---|---|---|---|
+| S01 | `cooperation-lab` command | `sandbox/cli.py`, `pyproject.toml` | `test_sandbox_cli.py`; fresh-venv run |
+| S02 | Home data folder | `sandbox/cli.py` | `test_command_serves_on_loopback...` |
+| S03 | Prompt agent | `sandbox/model_agent.py`, `workbench/agents.py` | `test_local_model_agent_plays...`; journey 1 |
+| S04 | HTTP agents, remote with consent | `lab/adapters.py`, `workbench/agents.py` | `test_remote_http_agent_needs_consent...` |
+| S05 | Python file agent | `sandbox/python_agent.py`, `python_runner.py` | `test_python_file_*`; journey 4 |
+| S06 | Local models | `sandbox/providers.py` | `test_presets_match...`, `test_model_list...` (fake server) |
+| S07 | BYO key providers | `sandbox/providers.py`, `model_agent.py` | `test_byo_key_agent...`, `test_anthropic_*` (stub) |
+| S08 | Test connection | `sandbox/providers.py`, `sandboxui.js` | `test_connection_test_*` |
+| S09 | Key manager | `sandbox/keys.py`, `api.py`, `sandboxui.js` | `test_key_routes...`, `test_dummy_key_appears_nowhere` |
+| S10 | Consent and estimate | `sandbox/experiment.py`, `sandboxui.js` | `test_consent_is_for_this_exact_design`; journey 2 |
+| S11 | Hard caps | `sandbox/experiment.py` (frozen `Budget`) | `test_cap_reached_stops_cleanly...` |
+| S12 | Retries, timeouts, rate limit, usage | `sandbox/model_agent.py`, `analysis.py` | `test_rate_limit...`, `test_timeout...`, `test_cost_and_tokens_add_up` |
+| S13 | Data model can grow | `workbench/simulations.py`, `analysis.py` (keyed by label) | `test_old_saved_experiments...` |
+| S14 | Sweeps | `sandbox/experiment.py`, `workbench/simulations.py` | `test_sweep_*`, `test_personas_*`; journey 3 |
+| S15 | Resource events | `sandbox/engine.py`, docs/sandbox-protocol.md | `test_sandbox_events.py` |
+| S16 | Behaviour profile | `sandbox/analysis.py`, docs/sandbox-metrics.md | `test_metrics_by_hand` and others |
+| S17 | Reaction view | `sandbox/analysis.py`, `sandboxui.js` | `test_reaction_by_hand`; journey 3 |
+| S18 | CIs, n, pairing, small-n | `sandbox/analysis.py` | `test_uncertainty_is_counted...`, `test_small_samples...` |
+| S19 | Plain-language findings | `sandbox/analysis.py` | `test_findings_state_uncertainty...` |
+| S20 | Labelled exports, no keys | `workbench/export.py` | `test_every_export_carries...`, `test_chart_numbers_equal...` |
+| S21 | Data source label | `sandbox/experiment.py` | `test_local_model_agent...`, `test_byo_key_agent...` |
+| S22 | Public demo lockout | `sandbox/policy.py`, `dashboard/server.py`, `workbench/api.py` | `test_public_demo_locks_out...`, `test_public_demo_host_runs_without...`, `test_public_demo.py` |
+| S23 | Run-it-yourself page | `sandboxui.js` | Browser checks, local and demo |
+| S24 | Simplified UI | `index.html`, `lib.js`, `app.js` | `navOf` node test; browser sweep |
+| S25 | Docs | README, docs/* , Help | Read through |
+| S26 | Frozen study unchanged | No change to `src/`, `docs/spec.md` | `test_the_frozen_study_is_untouched` |

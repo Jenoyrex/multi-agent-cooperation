@@ -1,14 +1,47 @@
 # Workbench
 
-An exploratory layer for running your own two-agent negotiations on the frozen engine.
-Open it from the dashboard (`PYTHONPATH=. py -m dashboard.server`, then **Workbench** in the
-sidebar). It never reads or writes the research database in `results/`. Its data lives in
-`sandbox_runs/workbench.db` (gitignored).
+The exploratory layer for running your own two-agent negotiations. Start it with `cooperation-lab`, or from a checkout with
+`PYTHONPATH=. py -m dashboard.server`. It never reads or writes the research database in `results/`. Installed, its data
+lives in `~/.cooperation-lab`; from a checkout, in `sandbox_runs/workbench.db` (gitignored).
 
-**Zero cost.** Rule-based and Python agents run locally. Claude, GPT and Gemini entries can be saved
-and reviewed but cannot run: real provider calls cost money and the project never makes them
-(`src/zero_cost.py` refuses them underneath as well). Every simulation is labelled by what actually
-ran. Rule-based results are **simulated** and say nothing about any LLM.
+**What runs, and who pays.** Rule-based agents run free anywhere. In the app on your own computer, prompt agents use a free local
+model or your own API key, HTTP agents are your own services, and Python files run in a separate process after you confirm.
+The study's Claude, GPT and Gemini configurations stay locked, and `src/zero_cost.py` still guards the research runner. Every
+experiment is labelled by what ran: "Rule-based (simulated)", "Local model: name" or "API model: provider/model". The
+public demo (`PUBLIC_DEMO=1`) has rule-based agents only.
+
+See [sandbox-protocol.md](sandbox-protocol.md) for resource events, [sandbox-metrics.md](sandbox-metrics.md) for every measure.
+
+## Agent kinds
+
+| Kind | What it is | Consent before a run | Public demo |
+|---|---|---|---|
+| `concession`, `priority` | Built-in rule-based strategies | None | Yes |
+| `prompt` | Connection + model + instructions + optional temperature | With an API key: estimate, token cap, "Run (uses your API key, you pay)" | No |
+| `http_local` | Your service on this computer | None | No |
+| `http_remote` | Your service elsewhere (no credentials or query in the URL) | "Send this experiment's turns to the remote HTTP agent's server" | No |
+| `python_file` | Your `.py` file, in its own process | "Run this file on my computer" | Inspect only |
+| `python_upload` | Inspected, never run | None | Yes |
+| `claude`, `openai`, `gemini` | The study's configurations | Locked | Locked |
+
+A prompt agent gets the study's view (pool, its own values, transcript, round) plus your instructions. It must answer with the
+action JSON (`action_type`, `allocation` as the units it receives, `message`). `src/agents/parsing.py` parses it strictly,
+and a failure is `invalid_action`.
+
+A Python file implements the interface below. `generate_response` may return a `NegotiationAction` (two-sided), or a dict in the
+HTTP agent's single-sided form. HTTP agents receive `notices`, and Python agents `view.notices`, after a resource event.
+
+## Model connection routes
+
+`/api/models/*` answers only a loopback client naming the local Host, and each POST needs an exact same-origin `Origin`. In the public
+demo the routes do not exist. `POST /api/workbench/simulations/estimate` sends nothing to any model: it returns the estimate, the
+required consents and a token naming that exact design, which `POST /api/workbench/simulations` must then present.
+
+## Caps
+
+A token cap is required with an API key. The frozen `Budget` checks it before every model call and reserves that call's worst
+case (three attempts at the longest possible prompt and reply). A run stops cleanly with status `cancelled` and a `stop_reason`, and
+the unfinished negotiation is `aborted`, not an outcome. Three connection failures in a row also stop a run with model agents.
 
 ## Pages
 
