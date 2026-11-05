@@ -1,6 +1,6 @@
 // Sandbox pages: model connections, the Run-it-yourself page, the consent panel and the behaviour analysis.
 // Every number comes from the server (sandbox/analysis.py). A key goes to the server once and is never shown again.
-import { designSize, esc, fmt, fmtCI, pct, simBody, sourceSummary } from "./lib.js";
+import { esc, fmt, fmtCI, simBody } from "./lib.js";
 
 const INSTALL = `python -m venv .venv
 # Windows:        .venv\\Scripts\\activate
@@ -39,7 +39,7 @@ export function createSandboxUI({ main, h, render, shared }) {
   // ------------------------------------------------------------ model connections
   const statusLine = (r) => !r ? "" : r.ok
     ? `<span class="ok-line">${icon("check")} ${esc(r.title ?? `${r.models?.length ?? 0} models found`)}${r.latency_s != null ? ` in ${r.latency_s} s` : ""}${r.input_tokens != null ? `, ${r.input_tokens + r.output_tokens} tokens` : ""}</span>`
-    : `<span class="bad-line">${icon("x")} ${esc(r.title)}. ${esc(r.hint ?? "")}</span>${r.detail ? `<details class="more"><summary>Details</summary><p class="note">${esc(r.detail)}</p></details>` : ""}`;
+    : `<span class="bad-line">${icon("x")} ${esc(r.title.replace(/\.$/, ""))}. ${esc(r.hint ?? "")}</span>${r.detail ? `<details class="more"><summary>Details</summary><p class="note">${esc(r.detail)}</p></details>` : ""}`;
 
   const connCard = (c) => {
     const models = state.models[c.id] ?? [];
@@ -49,7 +49,7 @@ export function createSandboxUI({ main, h, render, shared }) {
     return `<li class="sheet conn" data-conn="${c.id}"><div class="rc-head"><div><h3>${esc(c.name)}</h3><p class="sub">${c.base_url ? `<code>${esc(c.base_url)}</code>` : "Anthropic API"}</p></div>
         ${c.tier === "local" ? badge("good", "ready", "Free, on this computer") : badge("warn", "cloud", "You pay your provider")}</div>
       <p class="note">${esc(c.help)}</p>${keyRow}
-      <div class="testrow"><button type="button" class="btn" data-list="${c.id}">${icon("search")}Find models</button>
+      <div class="testrow"><button type="button" class="btn" data-list="${c.id}">${icon("list")}Find models</button>
         <label class="field grow"><span>Model</span><input type="text" list="m-${c.id}" spellcheck="false" value="${esc(state.model[c.id] ?? "")}" data-model-input placeholder="Model name"><datalist id="m-${c.id}">${models.map((m) => `<option value="${esc(m)}">`).join("")}</datalist></label>
         <button type="button" class="btn" data-test="${c.id}">${icon("bolt")}Test connection</button></div>
       <small class="note">${c.tier === "api" ? "Test sends one tiny request to your provider, which may cost a tiny amount. " : ""}Nothing is sent until you click.</small>
@@ -100,7 +100,9 @@ export function createSandboxUI({ main, h, render, shared }) {
       rerender();
     }));
     main.querySelectorAll("[data-test]").forEach((b) => b.addEventListener("click", async () => {
-      const id = b.dataset.test; b.disabled = true;
+      const id = b.dataset.test;
+      if (!state.model[id]?.trim()) { state.results[id] = { ok: false, title: "Choose a model first", hint: "Use Find models, or type its name." }; return rerender(); }
+      b.disabled = true;
       const res = await post("/api/models/test", { connection: id, model: state.model[id] ?? "" });
       state.results[id] = res.ok ? res.data : { ok: false, title: res.data?.error ?? "The test could not run", hint: "" };
       rerender();
@@ -128,9 +130,9 @@ export function createSandboxUI({ main, h, render, shared }) {
   function consentPanel(d, est) {
     const money = (v) => (v == null ? "unknown without prices" : v < 0.01 ? `under 0.01` : fmt(v, 2));
     const rows = est.agents.map((r) => `<tr><td><b>${esc(r.name)}</b><span class="sub">${esc(r.source)}</span></td><td class="num">${r.calls_max}</td><td class="num">${r.tokens_estimate.toLocaleString()}</td>
-      <td>${r.tier === "api" ? `<div class="pricepair"><input type="number" min="0" step="any" aria-label="Price per million input tokens for ${esc(r.model)}" placeholder="input" value="${d.prices[r.model]?.[0] ?? ""}" data-price="${esc(r.model)}" data-i="0"><input type="number" min="0" step="any" aria-label="Price per million output tokens for ${esc(r.model)}" placeholder="output" value="${d.prices[r.model]?.[1] ?? ""}" data-price="${esc(r.model)}" data-i="1"></div>` : '<span class="sub">free, local</span>'}</td></tr>`).join("");
+      <td>${r.tier === "api" ? `<div class="pricepair"><input type="number" min="0" step="any" aria-label="Price per million input tokens for ${esc(r.model)}" placeholder="in" value="${d.prices[r.model]?.[0] ?? ""}" data-price="${esc(r.model)}" data-i="0"><input type="number" min="0" step="any" aria-label="Price per million output tokens for ${esc(r.model)}" placeholder="out" value="${d.prices[r.model]?.[1] ?? ""}" data-price="${esc(r.model)}" data-i="1"></div>` : '<span class="sub">free, local</span>'}</td></tr>`).join("");
     const usesKey = est.required.some((c) => c.id === "api_cost");
-    const table = est.agents.length ? `<div class="table-wrap"><table><thead><tr><th>Model agent</th><th class="num">Most calls</th><th class="num">Tokens (estimate)</th><th>Your price per 1M tokens</th></tr></thead><tbody>${rows}</tbody></table></div>
+    const table = est.agents.length ? `<div class="table-wrap"><table><thead><tr><th>Model agent</th><th class="num">Most calls</th><th class="num">Tokens (estimate)</th><th>Your price per 1M tokens (in, out)</th></tr></thead><tbody>${rows}</tbody></table></div>
         <p class="note">${esc(est.note)}${usesKey ? " Enter prices from your provider's price page, in the currency you pay in; this app never guesses them." : ""}</p>` : "";
     const caps = usesKey ? `<dl class="review"><div><dt>Estimated tokens</dt><dd>${est.api_tokens_estimate.toLocaleString()}</dd></div><div><dt>Estimated cost</dt><dd>${money(est.cost_estimate)}</dd></div></dl>
         <div class="wb-grid2"><label class="field"><span>Stop at this many tokens</span><input type="number" min="1" step="1" value="${d.caps.max_tokens ?? ""}" data-cap="max_tokens" data-field="caps.max_tokens"><small class="note">Required. Checked before every call, keeping room for that call's worst case, so a run stops before the cap rather than after it.</small></label>
@@ -220,7 +222,8 @@ export function createSandboxUI({ main, h, render, shared }) {
 
   function usageBlock(sb) {
     const u = sb.usage;
-    if (!u.calls) return "";
+    const models = Object.values(sb.source_labels ?? {}).some((l) => /^(Local|API) model/.test(l)); // HTTP and Python agents have turns, not tokens
+    if (!u.calls || !models) return "";
     const known = (v) => (v == null ? "not reported" : v.toLocaleString());
     return `<section class="block"><div class="block-head"><h2>Calls, tokens and cost</h2><span class="note">As your model server reported. Tokens from discarded retries can't be seen, so your provider's bill is the real figure.</span></div>
       <dl class="factline"><div><dt>Calls</dt><dd>${u.calls}</dd></div><div><dt>Attempts</dt><dd>${u.attempts}</dd></div><div><dt>Input tokens</dt><dd>${known(u.input_tokens)}</dd></div><div><dt>Output tokens</dt><dd>${known(u.output_tokens)}</dd></div>
@@ -231,7 +234,7 @@ export function createSandboxUI({ main, h, render, shared }) {
     return sb.findings.length ? `<section class="block"><div class="block-head"><h2>In plain words</h2><span class="note">Generated from the numbers below. Nothing here says why an agent acted.</span></div><ul class="plainlist findings">${sb.findings.map((f) => `<li>${esc(f.text)}</li>`).join("")}</ul></section>` : "";
   }
 
-  const warningsBlock = (sb) => `${notice("info", "info", `<b>Exploratory.</b> ${esc(sb.exploratory.replace(/^Exploratory sandbox analysis: /, "This "))}`)}${sb.warnings.map((w) => notice("warn", "alert", esc(w))).join("")}${sb.intervals_ready ? "" : notice("info", "await", "Intervals appear when the experiment has finished.")}`;
+  const warningsBlock = (sb) => `${notice("info", "info", `<b>Exploratory.</b> ${esc(sb.exploratory.replace(/^Exploratory sandbox analysis: it describes/, "This describes"))}`)}${sb.warnings.map((w) => notice("warn", "alert", esc(w))).join("")}${sb.intervals_ready ? "" : notice("info", "await", "Intervals appear when the experiment has finished.")}`;
 
   function profileView(doc, sb, names) {
     return `${warningsBlock(sb)}${findingsBlock(sb)}
@@ -279,5 +282,5 @@ export function createSandboxUI({ main, h, render, shared }) {
     if (name === "models" && main.querySelector(".conn-list")) wireModels();
   }
 
-  return { routes: { models, "run-locally": runLocally }, names: ["models", "run-locally"], wire, estimateFor, consentPanel, consentReady, runLabel, wireConsent, sweepEditor, eventEditor, personaEditor, wireDesign, analysisViews, analysisBody, designSize, sourceSummary, pct };
+  return { routes: { models, "run-locally": runLocally }, names: ["models", "run-locally"], wire, estimateFor, consentPanel, consentReady, runLabel, wireConsent, sweepEditor, eventEditor, personaEditor, wireDesign, analysisViews, analysisBody };
 }

@@ -8,10 +8,13 @@ from __future__ import annotations
 import argparse
 import errno
 import os
+import secrets
 import threading
 import webbrowser
 from functools import partial
 from pathlib import Path
+
+from dashboard import demo
 
 HOME_ENV = "COOPERATION_LAB_HOME"
 DEFAULT_PORT = 8765
@@ -27,12 +30,26 @@ def use_data_dir(folder: Path) -> None:
     """Point every local store at the user's data folder."""
     from dashboard import sandbox as try_it
     from lab import evaluation
+    from sandbox import keys
     from workbench import store
 
     folder.mkdir(parents=True, exist_ok=True)
+    keys.env_file_dirs[:] = [folder]
+    ensure_lab_secret(folder, evaluation)
     store.DB_PATH = folder / "workbench.db"
     try_it.SANDBOX_DIR = folder / "runs"
     evaluation.LAB_DIR = folder / "runs" / "lab"
+
+
+def ensure_lab_secret(folder: Path, evaluation) -> None:
+    """Agent Lab needs a persistent secret that keeps its hidden scenarios reproducible. A checkout sets one in .env; an
+    installed app makes its own once, in the data folder. It is not an API key and is never sent to a model or an agent."""
+    if demo.enabled() or os.environ.get(evaluation.SECRET_ENV, "").strip():
+        return
+    path = folder / "lab-secret"
+    if not path.exists():
+        path.write_text(secrets.token_hex(32), encoding="utf-8")
+    os.environ[evaluation.SECRET_ENV] = path.read_text(encoding="utf-8").strip()
 
 
 def parse_args(argv=None) -> argparse.Namespace:

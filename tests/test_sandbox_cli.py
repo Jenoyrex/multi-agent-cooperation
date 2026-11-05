@@ -75,3 +75,14 @@ def test_command_serves_on_loopback_and_keeps_data_out_of_the_package(tmp_path):
     finally:
         proc.terminate()
         proc.wait(timeout=10)
+
+
+def test_installed_app_makes_one_lab_secret_and_keeps_it(tmp_path, monkeypatch):
+    from lab import evaluation
+    monkeypatch.delenv(evaluation.SECRET_ENV, raising=False)
+    cli.ensure_lab_secret(tmp_path, evaluation)
+    first = __import__("os").environ[evaluation.SECRET_ENV]
+    assert len(first) == 64 and evaluation.ready() is None
+    monkeypatch.delenv(evaluation.SECRET_ENV)
+    cli.ensure_lab_secret(tmp_path, evaluation)
+    assert __import__("os").environ[evaluation.SECRET_ENV] == first

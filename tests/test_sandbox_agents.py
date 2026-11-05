@@ -296,3 +296,39 @@ def test_public_demo_locks_out_every_local_feature(monkeypatch, server):  # noqa
 
 def consented_in_demo(aid):
     return {**design(aid), "consent": {"token": "x", "accepted": ["api_cost", "remote_http", "python_file"]}, "caps": {"max_tokens": 1000000}}
+
+
+def test_remote_url_cannot_carry_a_secret_into_reports():
+    for url in ("https://example.org/turn?token=abc", "https://example.org/turn#abc"):
+        with pytest.raises(WorkbenchError, match="query"):
+            A.validate({"name": "r", "kind": "http_remote", "params": {"url": url}})
+
+
+def test_only_this_computer_can_save_a_python_file_to_run():
+    policy.set_request_local(False)
+    with pytest.raises(WorkbenchError) as e:
+        python_agent()
+    assert e.value.status == 403
+    policy.set_request_local(True)
+    assert python_agent()
+
+
+def test_public_demo_host_runs_without_the_sdks_or_data_libraries():
+    """render.yaml installs pydantic and python-dotenv only, so no AI client exists on the public host."""
+    import subprocess
+    code = """
+import sys
+for name in ("openai", "anthropic", "pandas", "matplotlib"):
+    sys.modules[name] = None
+import dashboard.server
+from workbench import simulations as S, api
+doc = S.get(S.start({"name": "t", "environment": "builtin-field-hospital", "agents": {"X": "builtin-priority", "Y": "builtin-concession"},
+                     "conditions": ["baseline_v1"], "repetitions": 2, "swap_seats": False, "swap_first_mover": False}, background=False).id)
+assert doc["status"] == "completed", doc
+payload, status = api.get("/api/workbench/simulations/" + doc["id"])
+assert status == 200 and payload["analytics"]["sandbox"]["profiles"]
+print("ok")
+"""
+    env = {**os.environ, "PUBLIC_DEMO": "1", "PYTHONPATH": str(store.ROOT)}
+    r = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True, timeout=120, cwd=store.DB_PATH.parent)
+    assert r.returncode == 0 and r.stdout.strip().endswith("ok"), r.stderr[-800:]

@@ -171,7 +171,8 @@ class Simulation:
         self.provenance = {"protocol_id": provenance.PROTOCOL_ID, "spec_version": provenance.spec_version(),
                            "prompt_hash": provenance.prompt_hash(), "code_version": provenance.code_version(),
                            "engine": ("sandbox.engine.EventSession (sandbox_v1)" if cfg.get("events") else "src.negotiation.protocol.NegotiationSession (unchanged)"),
-                           "sandbox_protocol": cfg.get("sandbox_protocol"), "zero_cost_mode": not zero_cost.paid_calls_allowed()}
+                           "sandbox_protocol": cfg.get("sandbox_protocol"),
+                           "zero_cost_mode": not zero_cost.paid_calls_allowed() and not set(X.required_consents(cfg)) & {"api_cost", "remote_http"}}
         self._lock = threading.Lock()
 
     def note(self, text: str, level: str = "info"):

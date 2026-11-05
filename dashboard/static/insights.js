@@ -1,6 +1,6 @@
 // Start (guided workflow), cross-experiment Analytics and Compare, Reports and Settings.
 // Reads only /api/workbench/*; pooled numbers are re-described from stored negotiations (lib.js, unit-tested).
-import { boxStats, completedTrials, esc, fmt, OUTCOME_LABEL, OUTCOMES, pct, summarize } from "./lib.js";
+import { boxStats, completedTrials, esc, fmt, OUTCOME_LABEL, OUTCOMES, pct, sourceSummary, summarize } from "./lib.js";
 import { dataTable, stackBars } from "./charts.js";
 import { boxPlot, groupedBars, toggleLegend } from "./viz.js";
 import { COND_NAME, OUT_COLOR } from "./workbench.js";
@@ -9,7 +9,7 @@ const MAX_POOLED = 30; // experiments read for pooled analytics (newest first)
 
 export function createInsights({ main, h, render, wb, prefs }) {
   const { icon, notice } = h;
-  const { getJSON, badge, statusBadge, top, backLink, section, empty, chartCard, kpis, outcomeCharts, agentCharts, condTable, experimentList, download, catalog, quickStart, when } = wb;
+  const { getJSON, badge, statusBadge, top, backLink, section, empty, chartCard, kpis, outcomeCharts, agentCharts, condTable, experimentList, download, catalog, quickStart, when, sbx } = wb;
   const state = { cmp: { a: null, b: null }, docs: null };
 
   // ------------------------------------------------------------ start
@@ -21,8 +21,9 @@ export function createInsights({ main, h, render, wb, prefs }) {
     const steps = [["Choose two agents and what they divide", `${agents.filter((a) => a.executable).length} agents and ${envs.length} resource sets ready to use`],
       ["Run the negotiations", "Watch them live, or let them finish in seconds"],
       ["Read the results", "Value created, fairness, deals reached, and every transcript"]];
+    const demoMode = (await catalog()).demo;
     return `<header class="welcome"><h1>See how two negotiating agents share resources when neither knows what the other wants.</h1>
-        <p class="standfirst">Run a sample experiment to see it work. Everything runs on the lab's server at no cost.</p>
+        <p class="standfirst">${demoMode ? `Run a sample experiment to see it work. This public demo is rule-based only. <a href="#/run-locally">Download and run it yourself</a> to bring your own agents.` : `Run a sample experiment to see it work. Then bring your own agents: free local models, your own API keys, HTTP services or Python files.`}</p>
         <div class="welcome-actions"><button type="button" class="cta big" id="quick">${icon("play")}Run a sample experiment</button><a class="btn" href="#/simulations/new">Set up your own</a></div>
         <p class="note">The sample runs 24 negotiations between two built-in rule-based agents. Results are labelled <b>simulated</b>: they show how the lab measures behaviour, not how any AI model behaves.</p>
         <p class="step-error" id="quick-error" role="alert" hidden></p></header>
@@ -69,7 +70,7 @@ export function createInsights({ main, h, render, wb, prefs }) {
         ${chartCard("Spread of value created", "Each row is one experiment: the box holds its middle half of negotiations, the line its median.", box)}</div>
       ${section("Experiments", "Select one for its full analysis.", `<div class="table-wrap"><table><thead><tr><th>Experiment</th><th>Data</th><th class="num">n</th><th class="num">Deals reached</th><th class="num">Value created (RWE)</th><th class="num">Fairness (EW)</th><th class="num">Turns</th><th>Status</th></tr></thead><tbody>
         ${rows.map(({ d, s }) => `<tr class="link" data-href="#/simulation/${d.id}"><td><a href="#/simulation/${d.id}">${esc(d.config.name)}</a><div class="sub">${esc(d.config.agents.X.name)} vs ${esc(d.config.agents.Y.name)} · ${esc(d.config.environment.name)}</div></td>
-          <td>${d.config.data_kind === "simulated" ? "Simulated" : "Local agents"}</td><td class="num">${s.n}</td><td class="num">${pct(s.agreement_rate)}</td><td class="num">${fmt(s.rwe)}</td><td class="num">${fmt(s.ew)}</td><td class="num">${fmt(s.rounds, 1)}</td><td>${statusBadge(d.status)}</td></tr>`).join("")}</tbody></table></div>`)}`;
+          <td>${esc(sourceSummary(d))}</td><td class="num">${s.n}</td><td class="num">${pct(s.agreement_rate)}</td><td class="num">${fmt(s.rwe)}</td><td class="num">${fmt(s.ew)}</td><td class="num">${fmt(s.rounds, 1)}</td><td>${statusBadge(d.status)}</td></tr>`).join("")}</tbody></table></div>`)}`;
   }
 
   function compareView(docs) {
@@ -104,7 +105,7 @@ export function createInsights({ main, h, render, wb, prefs }) {
     const sims = await getJSON("/api/workbench/simulations");
     const ready = sims.filter((s) => s.done > 0);
     return `${top("Reports", "A printable summary of each experiment: setup, results, charts, interpretation, limitations and provenance. Save one as PDF from your browser's print dialog, or download the data.")}
-      ${ready.length ? `<ul class="ilist">${ready.map((s) => `<li><a class="irow" href="#/report/${s.id}"><span class="filetag">${icon("doc")}</span><span class="imain"><b>${esc(s.name)}</b><span class="sub">${s.done} negotiations · ${s.data_kind === "simulated" ? "simulated" : "local agents"} · ${when(s.created)}</span></span>${statusBadge(s.status)}${icon("chev-r")}</a></li>`).join("")}</ul>`
+      ${ready.length ? `<ul class="ilist">${ready.map((s) => `<li><a class="irow" href="#/report/${s.id}"><span class="filetag">${icon("doc")}</span><span class="imain"><b>${esc(s.name)}</b><span class="sub">${s.done} negotiations · ${esc(sourceSummary(s))} · ${when(s.created)}</span></span>${statusBadge(s.status)}${icon("chev-r")}</a></li>`).join("")}</ul>`
         : empty("No reports yet", "A report is ready as soon as an experiment has finished negotiations.", `<a class="cta" href="#/simulations/new">${icon("plus")}Set up an experiment</a>`)}`;
   }
 
@@ -118,7 +119,9 @@ export function createInsights({ main, h, render, wb, prefs }) {
     const resTable = env.source === "generated" ? `<p>Generated by the research generator: ${env.categories} resources with quantities and private values drawn anew for each seed (${cfg.base_seed}–${cfg.base_seed + cfg.repetitions - 1}).</p>`
       : `<div class="table-wrap"><table><thead><tr><th>Resource</th><th>Category</th><th class="num">Quantity</th><th class="num">${esc(names.X)} / A points</th><th class="num">B points</th></tr></thead><tbody>${Object.entries(env.resources).map(([c, q]) => `<tr><td>${esc(c)}</td><td>${esc(env.meta?.[c]?.group ?? "—")}</td><td class="num">${q} ${esc(env.meta?.[c]?.unit ?? "")}</td><td class="num">${env.points.A[c]}</td><td class="num">${env.points.B[c]}</td></tr>`).join("")}</tbody></table></div><p class="note">Points are seat values: with seats swapped, each agent held both A's and B's.</p>`;
     const limits = [
-      cfg.data_kind === "simulated" ? "Simulated data: both agents follow fixed rules. Nothing here is evidence about Claude, GPT, Gemini or any language model." : "Local agents: the results describe the programs that answered on the lab's server, not any named model, and are not a controlled experiment.",
+      cfg.data_kind === "simulated" ? "Simulated data: both agents follow fixed rules. Nothing here is evidence about Claude, GPT, Gemini or any language model."
+        : ["local-model", "api-model"].includes(cfg.data_kind) ? `Data source: ${sourceSummary(cfg)}. These results describe the named model with the instructions used here, in these runs. They are not the research study's results, and may differ between runs.`
+        : "Your own agents: the results describe the programs that answered, not any named model, and are not a controlled experiment.",
       "Every statistic is descriptive unless marked exploratory; none is the preregistered confirmatory analysis.",
       env.source === "custom" ? "A fixed resource set is one situation however many repetitions ran; results may not carry over to other values." : "Each seed is a different situation; the number of seeds limits how far patterns generalise.",
       ...(Object.keys(a.not_outcomes ?? {}).length ? [`${Object.entries(a.not_outcomes).map(([k, v]) => `${v} ${k}`).join(", ")} negotiation(s) are not outcomes and are excluded.`] : []),
@@ -138,12 +141,15 @@ export function createInsights({ main, h, render, wb, prefs }) {
           <dt>Design</dt><dd>${cfg.repetitions} repetition(s) from seed ${cfg.base_seed}; seats swapped ${cfg.swap_seats ? "yes" : "no"}; opener swapped ${cfg.swap_first_mover ? "yes" : "no"}; ${env.max_rounds} turns at most</dd></dl>
           <h3>Resources: ${esc(env.name)}</h3>${resTable}</section>
         ${oc ? `<section><h2>Results</h2><div class="cgrid">${oc.donut}${oc.box}${oc.scatter}${oc.rounds}</div>${condTable(a)}</section>` : ""}
+        ${a.n_completed ? `<section class="report-sandbox"><h2>Behaviour profile</h2>${sbx.analysisBody("profile", doc, names)}</section>` : ""}
+        ${a.sandbox?.sweep ? `<section class="report-sandbox"><h2>Comparison between groups</h2>${sbx.analysisBody("compare", doc, names)}</section>` : ""}
+        ${a.sandbox?.reactions ? `<section class="report-sandbox"><h2>Reaction to resource events</h2>${sbx.analysisBody("reaction", doc, names)}</section>` : ""}
         ${ac ? `<section><h2>Agent behaviour</h2><div class="cgrid">${ac.radar}${ac.concession}</div></section>` : ""}
         <section><h2>Interpretation</h2>${a.observations.length ? `<ul class="wb-obs">${a.observations.map((o) => `<li><span class="badge">${esc(o.basis)}</span><p>${esc(o.text)}</p><span class="sub">n = ${o.n}</span></li>`).join("")}</ul>` : '<p class="note">No observations: too few negotiations.</p>'}
           ${a.inference?.available ? `<p class="note">Exploratory tests (spec §8.9 procedures, not confirmatory): ${Object.entries(a.inference.result.primary).map(([k, x]) => `${k} ${x.permutation.defined ? (x.permutation.reject ? "significant" : "not significant") : "not testable"} after Holm`).join("; ")}.</p>` : ""}</section>
         <section><h2>Limitations</h2><ul class="plainlist">${limits.map((l) => `<li>${esc(l)}</li>`).join("")}</ul></section>
         <section><h2>Provenance</h2><dl class="kvs wide"><dt>Experiment id</dt><dd><code>${doc.id}</code></dd><dt>Engine</dt><dd>${esc(doc.provenance.engine)}</dd><dt>Protocol</dt><dd><code>${esc(doc.provenance.protocol_id)}</code> · spec ${esc(doc.provenance.spec_version)}</dd>
-          <dt>Prompts</dt><dd><code>${esc(String(doc.provenance.prompt_hash).slice(0, 16))}</code></dd><dt>Code</dt><dd><code>${esc(String(doc.provenance.code_version).slice(0, 16))}</code></dd><dt>Zero-cost mode</dt><dd>${doc.provenance.zero_cost_mode ? "On: no paid or external model calls" : "Off"}</dd>
+          <dt>Prompts</dt><dd><code>${esc(String(doc.provenance.prompt_hash).slice(0, 16))}</code></dd><dt>Code</dt><dd><code>${esc(String(doc.provenance.code_version).slice(0, 16))}</code></dd><dt>Zero-cost mode</dt><dd>${doc.provenance.zero_cost_mode ? "On: no paid or external model calls" : "Off for this experiment: it used an API key or a remote agent"}</dd>
           <dt>Started · finished</dt><dd>${new Date(doc.created * 1000).toLocaleString()} · ${doc.finished ? new Date(doc.finished * 1000).toLocaleString() : "—"}</dd></dl></section>
       </article>${'<p class="step-error" id="wb-error" role="alert" hidden></p>'}`;
   }
@@ -158,12 +164,13 @@ export function createInsights({ main, h, render, wb, prefs }) {
         ${row("Theme", "System follows your device's light or dark setting.", seg("theme", prefs.theme(), [["system", "System"], ["light", "Light"], ["dark", "Dark"]]))}
         ${row("Motion", "Reduce turns off movement and transitions, whatever your device says.", seg("motion", prefs.motion(), [["system", "System"], ["reduce", "Reduce"]]))}</ul></section>
       <section class="block"><div class="block-head"><h2>Cost and AI providers</h2></div><ul class="ilist settings">
-        ${row("Zero-cost mode", "The server refuses every paid or external model call before anything is sent. It cannot be switched off from this page.", cat.zero_cost ? badge("good", "lock", "On") : badge("warn", "alert", "Off"))}
+        ${row(cat.local_features ? "Research study's zero-cost lock" : "Zero-cost mode", cat.local_features ? "The research study's runner refuses paid model calls. Sandbox agents are separate: a local model is free, and an API key is yours, used only after you confirm an estimate and set a cap." : "This public demo calls no model at all. It cannot be switched off from this page.", cat.zero_cost ? badge("good", "lock", "On") : badge("warn", "alert", "Off"))}
         ${cat.kinds.filter((k) => k.category === "provider").map((k) => row(esc(k.label), esc(k.reason), badge(k.id === "gemini" ? "" : "warn", k.id === "gemini" ? "x" : "lock", k.id === "gemini" ? "No adapter" : "Locked"))).join("")}
-        ${row("API keys", "Never entered in the browser. The server reads them only from its own .env file, and does not use them while zero-cost mode is on.", badge("", "lock", "Server only"))}</ul></section>
+        ${cat.local_features ? row("API keys", `Added under <a href="#/models">Model connections</a>, or read from your environment or a local .env. Kept in memory, shown masked, and never saved to the database, exports, reports or logs.`, badge("", "lock", "Never saved"))
+          : row("API keys", `This public demo takes no keys. <a href="#/run-locally">Run the app on your computer</a> to use your own.`, badge("", "lock", "None here"))}</ul></section>
       <section class="block"><div class="block-head"><h2>Your data</h2></div><ul class="ilist settings">
-        ${row("Agents, resources and experiments", "Stored on the lab's server in <code>sandbox_runs/workbench.db</code>, separate from the research study.", badge("", "info", "Local"))}
-        ${row("Uploaded Python files", `Stored with the agent and checked by reading the code (up to ${Math.round((cat.upload?.max_bytes ?? 48000) / 1000)} KB). This server never executes them.`, badge("", "lock", "Never executed"))}
+        ${row("Agents, resources and experiments", "Stored in the app's own database, separate from the research study.", badge("", "info", "Local"))}
+        ${row("Uploaded Python files", `Stored with the agent and checked by reading the code (up to ${Math.round((cat.upload?.max_bytes ?? 48000) / 1000)} KB). ${cat.local_features ? "A file runs only after you confirm, in its own process on this computer." : "This public demo never executes them."}`, badge("", "lock", cat.local_features ? "Asks first" : "Never executed"))}
         ${row("Research study data", "The preregistered study's records in <code>results/</code> are read-only here and never changed by the Workbench.", badge("", "lock", "Read-only"))}
         ${cat.demo ? row("Public demo", `This is a shared presentation server. Everything created here is visible to every visitor, cannot be edited or deleted, and is erased when the server restarts. Experiments run at most ${cat.limits.negotiations} negotiations; local HTTP agents are off.`, badge("warn", "alert", "Shared")) : ""}</ul></section>`;
   }

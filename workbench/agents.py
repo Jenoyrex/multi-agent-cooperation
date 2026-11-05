@@ -150,8 +150,8 @@ def _http_build(name: str, p: dict, variant: str) -> Agent:
 def _remote_check(p: dict) -> None:
     from sandbox import policy
     u = urlparse(p["url"])
-    if u.scheme not in ("http", "https") or not u.hostname or u.username or u.password:
-        raise WorkbenchError("Use a full http:// or https:// URL, without credentials in it.", "params.url")
+    if u.scheme not in ("http", "https") or not u.hostname or u.username or u.password or u.query or u.fragment:
+        raise WorkbenchError("Use a full http:// or https:// URL, without credentials or a query in it (the URL is shown in reports and exports).", "params.url")
     if u.hostname in LOOPBACK:
         raise WorkbenchError("That address is on this computer. Use a Local HTTP agent for it.", "params.url")
     policy.require_local("A remote HTTP agent")
@@ -298,6 +298,9 @@ def validate(doc) -> dict:
     if kind.check:
         kind.check(params)
     clean = {"name": name, "kind": kind.id, "params": params, "notes": notes}
+    if kind.id == "python_file":  # saved for running later, so only this computer may add one
+        from sandbox import policy
+        policy.require_local("Adding a Python file to run")
     if kind.id in UPLOAD_KINDS:  # the server re-inspects the file; a client-side report is never trusted
         from workbench.inspect_agent import inspect_source
         up = doc.get("upload")
