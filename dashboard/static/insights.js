@@ -1,6 +1,6 @@
 // Start (guided workflow), cross-experiment Analytics and Compare, Reports and Settings.
 // Reads only /api/workbench/*; pooled numbers are re-described from stored negotiations (lib.js, unit-tested).
-import { boxStats, completedTrials, esc, fmt, journey, OUTCOME_LABEL, OUTCOMES, pct, summarize } from "./lib.js";
+import { boxStats, completedTrials, esc, fmt, OUTCOME_LABEL, OUTCOMES, pct, summarize } from "./lib.js";
 import { dataTable, stackBars } from "./charts.js";
 import { boxPlot, groupedBars, toggleLegend } from "./viz.js";
 import { COND_NAME, OUT_COLOR } from "./workbench.js";
@@ -14,37 +14,22 @@ export function createInsights({ main, h, render, wb, prefs }) {
 
   // ------------------------------------------------------------ start
   async function start() {
-    let agents, envs, sims;
-    try { [agents, envs, sims] = await Promise.all([getJSON("/api/workbench/agents"), getJSON("/api/workbench/environments"), getJSON("/api/workbench/simulations")]); }
+    let sims;
+    try { sims = await getJSON("/api/workbench/simulations"); }
     catch (e) { return `${top("Cooperation Lab")}${notice("warn", "alert", `The server did not answer (${esc(e.message)}).`)}`; }
-    const j = journey({ agents, environments: envs, simulations: sims });
-    const done = sims.find((s) => s.status === "completed" && s.done > 0);
-    const steps = [
-      ["agents", "Add your agents", "Pick a built-in strategy, upload your own Python agent, or set up an AI provider.", "#/agents/new", "Add an agent", j.agents, `${agents.filter((a) => !a.builtin).length} of your own · ${agents.filter((a) => a.builtin).length} built-in ready to use`],
-      ["resources", "Define the resources", "Say what is being divided, how many units exist, and how much each agent values them.", "#/environments/new", "Build a resource set", j.resources, `${envs.filter((e) => !e.builtin).length} of your own · ${envs.filter((e) => e.builtin).length} templates`],
-      ["experiment", "Run an experiment", "Choose two agents and a resource set, decide the design, and watch it run live.", "#/simulations/new", "Set up an experiment", j.experiment, `${sims.length} experiment${sims.length === 1 ? "" : "s"} so far`],
-      ["analysis", "Explore the results", "Every finished experiment is analysed automatically, with interactive charts and plain-language findings.", done ? `#/simulation/${done.id}` : "#/analytics", "Open the analysis", j.analysis, done ? `Latest: ${esc(done.name)}` : "Available after your first experiment"],
-      ["export", "Share your findings", "Open a printable report, save it as PDF, or download the data as CSV and JSON.", done ? `#/report/${done.id}` : "#/reports", "Open a report", false, done ? "Reports are ready for finished experiments" : "Available after your first experiment"],
-    ];
-    const current = steps.findIndex((s) => !s[5]);
     const running = sims.find((s) => s.status === "running");
-    return `<header class="welcome"><h1>Run negotiation experiments between agents, and see how they cooperate.</h1>
-        <p class="standfirst">Bring your agents, decide what they divide, run the experiment, and read what happened. Everything runs on the lab's server at no cost.</p></header>
+    return `<header class="home-hero"><h1>See how two agents negotiate.</h1>
+        <p class="standfirst">Two agents split a shared pile of resources. Each knows only what it wants. Run an experiment to see who reaches a deal, and how fair it is.</p>
+        <div class="home-actions"><button type="button" class="cta big" id="quick">${icon("play")}Run a sample experiment</button><a class="link" href="#/simulations/new">Set up my own${icon("chev-r")}</a></div>
+        <p class="note">Takes about a minute. Free, with no sign-up.</p><p class="step-error" id="quick-error" role="alert" hidden></p></header>
       ${running ? `<a class="runningbar" href="#/simulation/${running.id}">${badge("accent", "await", "Running")}<b>${esc(running.name)}</b><span class="sub">${running.done} of ${running.planned} negotiations</span>${icon("chev-r")}</a>` : ""}
-      <div class="startgrid">
-        <ol class="journey" aria-label="Getting started">${steps.map(([k, title, text, href, cta, isDone, meta], i) => `<li class="${isDone ? "done" : i === current ? "now" : ""}">
-          <span class="jmark" aria-hidden="true">${isDone ? icon("check") : i + 1}</span>
-          <div class="jbody"><h2>${title}${isDone ? ' <span class="vh">(done)</span>' : ""}</h2><p>${text}</p><span class="sub">${meta}</span></div>
-          <a class="${i === current ? "cta" : "btn"}" href="${href}">${cta}</a></li>`).join("")}</ol>
-        <aside class="quick sheet"><h2>New here?</h2><p>Run a first experiment in one click: two built-in strategies negotiate over generated resources, 24 negotiations across 3 different situations and both instruction conditions.</p>
-          <button type="button" class="cta" id="quick">${icon("play")}Run a sample experiment</button>
-          <p class="note">Real negotiations on the unchanged engine, between rule-based agents. Labelled <b>simulated</b>: they show how the lab measures behaviour, not how any AI model behaves.</p><p class="step-error" id="quick-error" role="alert" hidden></p></aside>
-      </div>
-      ${section("Recent experiments", "", sims.length ? experimentList(sims.slice(0, 5)) : empty("No experiments yet", "Your experiments will appear here with their progress and results."))}
-      ${section("What runs here", "", `<ul class="caps"><li>${badge("good", "ready", "Runs free")}<span><b>Built-in strategies and your local programs</b> run on the lab's server.</span></li>
-        <li>${badge("", "lock", "Inspected")}<span><b>Uploaded Python files</b> are checked against the agent interface, never executed.</span></li>
-        <li>${badge("warn", "lock", "Locked")}<span><b>Claude, GPT and Gemini</b> can be configured; their APIs are paid, so they never run here.</span></li></ul>`)}
-      <section class="block study-link"><a class="irow" href="#/study"><span class="imain"><b>The research study</b><span class="sub">The preregistered Claude vs GPT experiment this platform was built for: read-only progress, results and methodology.</span></span>${icon("chev-r")}</a></section>`;
+      <ol class="how" aria-label="How it works">
+        <li><h2>Pick two strategies</h2><p>Choose how each side bargains, or use the ready-made pair.</p></li>
+        <li><h2>Watch them bargain</h2><p>Turn by turn, each side makes an offer, accepts, or walks away.</p></li>
+        <li><h2>Read the results</h2><p>See the deals, who came out ahead, and what the data shows.</p></li>
+      </ol>
+      <p class="note home-truth">The agents here are rule-based programs. Results show how the lab measures negotiation, not how any AI model behaves.</p>
+      ${sims.length ? section("Recent experiments", `<a class="link" href="#/simulations">All experiments${icon("chev-r")}</a>`, experimentList(sims.slice(0, 3))) : ""}`;
   }
 
   // ------------------------------------------------------------ analytics hub

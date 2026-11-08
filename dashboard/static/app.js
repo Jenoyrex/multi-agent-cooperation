@@ -85,6 +85,7 @@ async function render(animate = true) {
   const view = Object.hasOwn(routes, name) ? routes[name] : notFound;
   const navKey = NAV_OF[name] ?? name;
   document.querySelectorAll(".rail nav a").forEach((a) => (a.dataset.route === navKey ? a.setAttribute("aria-current", "page") : a.removeAttribute("aria-current")));
+  document.querySelector(".navmore").open = false;
   figN = 0;
   cleanups.forEach((f) => f()); cleanups = [];
   field.page(name === "study" ? "overview" : ["live", "result", "negotiation"].includes(name) ? "negotiation" : name);
@@ -132,7 +133,7 @@ const wb = createWorkbench({ main, h: shellH, render: (animate) => render(animat
 const ins = createInsights({ main, h: shellH, render: (animate) => render(animate), wb: wb.shared, prefs: createPrefs() });
 Object.assign(routes, wb.routes, ins.routes, { workbench: () => { location.replace("#/"); return ""; } });
 Object.assign(NAV_OF, wb.nav, ins.nav);
-const DEMO_BAR = `<p class="demobar noprint">${icon("info")}<span><b>Public demo.</b> A shared presentation server: everything here is visible to all visitors and erased on restart. Agents are rule-based; no AI model is ever called. <a href="#/settings">Details</a></span></p>`;
+const DEMO_BAR = `<p class="demobar noprint">Public demo. Everything here is shared with other visitors and erased on restart. <a href="#/settings">Details</a></p>`;
 const pilotNotice = notice("info", "info", "<b>Operational pilot (spec §8.4).</b> Three instances across the eight design cells. Pilot negotiations are excluded from the confirmatory dataset, so treat these values as checks on the harness, not findings.");
 
 function register(rows, seeds, kind) {
@@ -1796,11 +1797,13 @@ function createPrefs() {
 
 // boot + live refresh (re-render only when the stored data changed)
 const live = document.getElementById("live");
+const more = document.querySelector(".navmore");
+document.addEventListener("click", (e) => { if (more.open && !more.contains(e.target)) more.open = false; });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && more.open) { more.open = false; more.querySelector("summary").focus(); } });
 async function boot() {
   try {
     st.sbx = await getJSON("/api/sandbox/info");
     st.demo = st.sbx.public_demo === true;
-    if (st.demo) document.querySelector(".brand small").textContent = "Public demo · scripted agents";
     await load(); await render(false);
   } catch (e) {
     const local = ["localhost", "127.0.0.1"].includes(location.hostname);

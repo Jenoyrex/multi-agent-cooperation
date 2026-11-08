@@ -439,7 +439,7 @@ export function createWorkbench({ main, h, render, onCleanup, motion }) {
   const newSim = () => ({ name: "", environment: "builtin-research", agents: { X: "builtin-priority", Y: "builtin-concession" },
     conditions: ["baseline_v1", "structured_v1"], repetitions: 3, base_seed: 0, swap_seats: true, swap_first_mover: true, pace: "watch" });
   const designSize = (d) => d.repetitions * d.conditions.length * (d.swap_seats ? 2 : 1) * (d.swap_first_mover ? 2 : 1);
-  const STEPS = [["agents", "Agents"], ["resources", "Resources"], ["preferences", "Preferences"], ["settings", "Settings"], ["review", "Review"]];
+  const STEPS = [["agents", "Agents"], ["resources", "Resources"], ["review", "Review"]];
 
   async function simulations(_s, arg) {
     try { await catalog(); } catch (e) { return unavailable(e.message); }
@@ -462,18 +462,15 @@ export function createWorkbench({ main, h, render, onCleanup, motion }) {
     const deaf = a && b && ![a, b].some((x) => kindOf(x.kind).reads_instructions);
     const simulated = a && b && [a, b].every((x) => ["mock", "python"].includes(x.category));
     const stepper = `<ol class="stepper" aria-label="Experiment setup">${STEPS.map(([k, t], i) => `<li class="${i < step ? "done" : i === step ? "now" : ""}"><a href="#/simulations/new/${k}"${i === step ? ' aria-current="step"' : ""}><i>${i < step ? icon("check") : i + 1}</i>${t}</a></li>`).join("")}</ol>`;
-    const agentPick = (slot) => `<fieldset class="choice"><legend>Agent ${slot}</legend><div class="pickgrid">${agentList.map((x) => `<label class="opt${x.executable ? "" : " off"}"><input type="radio" name="agent-${slot}" value="${x.id}"${x.id === d.agents[slot] ? " checked" : ""}${x.executable ? "" : " disabled"}>
-        <span><b>${esc(x.name)}</b><small>${esc(x.kind_label)}${x.executable ? "" : ` · ${x.category === "upload" ? "inspected, not executed" : "locked"}`}</small></span></label>`).join("")}</div></fieldset>`;
+    const agentPick = (slot) => `<fieldset class="choice"><legend>Agent ${slot}</legend><div class="pickgrid">${agentList.filter((x) => x.executable).map((x) => `<label class="opt"><input type="radio" name="agent-${slot}" value="${x.id}"${x.id === d.agents[slot] ? " checked" : ""}>
+        <span><b>${esc(x.name)}</b><small>${esc(x.notes || x.kind_label)}</small></span></label>`).join("")}</div></fieldset>`;
     let body;
-    if (step === 0) body = `<h2>Who negotiates?</h2><p class="note">Pick two agents. They can be the same agent (self-play). Locked and uploaded agents are shown but cannot run here.</p>
-      <div class="wb-grid2">${agentPick("X")}${agentPick("Y")}</div><p class="note">Need another agent? <a href="#/agents/new">Add one</a>; your choices here are kept.</p>`;
-    else if (step === 1) body = `<h2>What do they divide?</h2><p class="note">Choose a resource set. You can build your own under <a href="#/environments/new">Resources</a>.</p>
+    if (step === 0) body = `<h2>Who negotiates?</h2><p class="note">Pick a strategy for each side. Both can use the same one.</p>
+      <div class="wb-grid2">${agentPick("X")}${agentPick("Y")}</div><p class="note"><a href="#/agents/new">Add your own agent</a></p>`;
+    else if (step === 1) body = `<h2>What do they divide?</h2><p class="note">Each side privately spreads 100 points across the resources and never sees the other side's points.</p>
       <fieldset class="choice"><legend class="vh">Resource set</legend><div class="pickgrid wide">${envList.map((e) => `<label class="opt"><input type="radio" name="env" value="${e.id}"${e.id === d.environment ? " checked" : ""}>
-        <span><b>${esc(e.name)}</b><small>${e.source === "generated" ? `${e.categories} resources, new per seed` : Object.entries(e.resources).map(([c, q]) => `${q} ${e.meta?.[c]?.unit ? `${e.meta[c].unit} of ` : ""}${c}`).join(" · ")}</small></span></label>`).join("")}</div></fieldset>`;
-    else if (step === 2) body = `<h2>What does each agent want?</h2><p class="note">Private preferences come from the resource set: each agent spreads 100 points over the resources, and never sees the other's.</p>
-      ${env?.source === "generated" ? notice("info", "info", "This resource set uses the research generator, so preferences are drawn anew for every seed. Each repetition is a different situation.")
-        : env ? `${butterfly(Object.keys(env.resources).map((c) => ({ name: c, a: env.points.A[c], b: env.points.B[c] })))}${env.builtin ? `<p class="note">A template. To change these values, duplicate it under <a href="#/environments/${env.id}">Resources</a>.</p>` : `<p class="note"><a href="#/environments/${env.id}">Edit these values</a></p>`}` : ""}
-      <p class="note">With seats swapped (next step), each agent plays both A and B, so neither is favoured by the values it was dealt.</p>`;
+        <span><b>${esc(e.name)}</b><small>${esc(e.description || (e.source === "generated" ? `${e.categories} resources, new per seed` : Object.keys(e.resources).join(", ")))}</small></span></label>`).join("")}</div></fieldset>
+      ${env && env.source !== "generated" ? butterfly(Object.keys(env.resources).map((c) => ({ name: c, a: env.points.A[c], b: env.points.B[c] }))) : ""}`;
     else if (step === 3) body = `<h2>How should it run?</h2>
       <fieldset class="choice"><legend>Instruction conditions</legend>
         ${state.catalog.conditions.map((c) => `<label class="opt"><input type="checkbox" data-cond="${c}"${d.conditions.includes(c) ? " checked" : ""} data-field="conditions"><span><b>${COND_NAME[c]} instructions</b><small><code>${c}</code>${deaf ? " · not read by these agents" : ""}</small></span></label>`).join("")}
@@ -492,21 +489,31 @@ export function createWorkbench({ main, h, render, onCleanup, motion }) {
         <div><dt>Negotiations</dt><dd><b>${n}</b>${n > lim.negotiations ? ` ${badge("crit", "x", `over the ${lim.negotiations} limit`)}` : ""}</dd></div>
         <div><dt>Cost and label</dt><dd>₹0 · ${simulated ? "rule-based agents, labelled simulated" : "local agents on the lab's server, labelled local agents"}</dd></div></dl>
       ${env?.source === "custom" && a && b && kindOf(a.kind).deterministic && kindOf(b.kind).deterministic && d.repetitions > 1 ? notice("warn", "alert", "Fixed values and repeatable agents: every repetition will replay the first one exactly. Use the research generator for varied situations.") : ""}
-      ${deaf && d.conditions.length > 1 ? notice("info", "info", "Neither agent reads instructions, so both conditions will give identical results. That checks the pipeline; it is not a finding.") : ""}`;
-    const blocker = step === 0 && !(a?.executable && b?.executable) ? "Choose two agents that can run." : step === 3 && !d.conditions.length ? "Choose at least one condition." : "";
+      ${deaf && d.conditions.length > 1 ? notice("info", "info", "Neither agent reads instructions, so both conditions will give identical results. That checks the pipeline; it is not a finding.") : ""}
+      <details class="advanced" id="wiz-adv"${state.adv ? " open" : ""}><summary>Advanced settings</summary>
+      <fieldset class="choice"><legend>Instruction conditions</legend>
+        ${state.catalog.conditions.map((c) => `<label class="opt"><input type="checkbox" data-cond="${c}"${d.conditions.includes(c) ? " checked" : ""} data-field="conditions"><span><b>${COND_NAME[c]} instructions</b><small><code>${c}</code>${deaf ? " · not read by these agents" : ""}</small></span></label>`).join("")}
+        <small class="note">The research study's frozen instruction variants. Agents that read instructions receive them each turn.</small></fieldset>
+      <div class="wb-grid2"><label class="field"><span>Repetitions</span><input type="number" min="1" max="${lim.repetitions}" step="1" value="${d.repetitions}" data-n="repetitions" data-field="repetitions"><small class="note">Each uses its own seed.</small></label>
+        <label class="field"><span>First seed</span><input type="number" min="0" step="1" value="${d.base_seed}" data-n="base_seed" data-field="base_seed"><small class="note">Seeds count up from here.</small></label></div>
+      <div class="wb-toggles"><label class="toggle"><input type="checkbox" data-b="swap_seats"${d.swap_seats ? " checked" : ""}> Swap seats, so each agent plays A and B</label>
+        <label class="toggle"><input type="checkbox" data-b="swap_first_mover"${d.swap_first_mover ? " checked" : ""}> Swap who makes the first offer</label></div>
+      <fieldset class="choice"><legend>Pace</legend><div class="seg" role="group" aria-label="Pace">${[["watch", "Watch live"], ["instant", "As fast as possible"]].map(([v, t]) => `<button type="button" data-pace="${v}" aria-pressed="${d.pace === v}">${t}</button>`).join("")}</div>
+        <small class="note">${d.pace === "watch" ? "Turns are spaced 0.35 s apart so you can follow them; the agents themselves answer instantly." : "No pacing: rule-based agents finish in well under a second."}</small></fieldset>
+      </details>`;
+    const blocker = step === 0 && !(a?.executable && b?.executable) ? "Choose two agents that can run." : step === 2 && !d.conditions.length ? "Choose at least one condition." : "";
     const nextBtn = step < STEPS.length - 1 ? `<a class="cta" href="#/simulations/new/${STEPS[step + 1][0]}"${blocker ? ' aria-disabled="true" data-block' : ""}>Continue${icon("chev-r")}</a>`
       : `<button type="button" class="cta" id="launch"${n > lim.negotiations || !d.conditions.length ? " disabled" : ""}>${icon("play")}Run ${n} negotiation${n === 1 ? "" : "s"}</button>`;
     return `${top("New experiment", "", "", backLink("#/simulations", "Experiments"))}${stepper}
-      <div class="wb-split"><form class="sheet wizard" id="sim-form" novalidate>${body}${errorLine(blocker)}
-        <div class="stepnav">${step ? `<a class="btn" href="#/simulations/new/${STEPS[step - 1][0]}">${icon("chev-l")}Back</a>` : '<span></span>'}${nextBtn}</div></form>
-      <aside class="sheet wb-aside"><h2 class="wb-h3">So far</h2><dl class="kvs"><dt>Agents</dt><dd>${esc(a?.name ?? "—")} · ${esc(b?.name ?? "—")}</dd><dt>Resources</dt><dd>${esc(env?.name ?? "—")}</dd>
-        <dt>Negotiations</dt><dd>${n}</dd><dt>Cost</dt><dd>₹0</dd></dl></aside></div>`;
+      <form class="sheet wizard" id="sim-form" novalidate>${body}${errorLine(blocker)}
+        <div class="stepnav">${step ? `<a class="btn" href="#/simulations/new/${STEPS[step - 1][0]}">${icon("chev-l")}Back</a>` : '<span></span>'}${nextBtn}</div></form>`;
   }
 
   function wireWizard() {
     const form = main.querySelector("#sim-form");
     if (!form) return;
     const d = state.simDraft;
+    form.querySelector("#wiz-adv")?.addEventListener("toggle", (e) => { state.adv = e.target.open; });
     const on = (sel, ev, fn) => form.querySelectorAll(sel).forEach((el) => el.addEventListener(ev, () => fn(el)));
     on('input[name^="agent-"]', "change", (el) => { d.agents[el.name.slice(-1)] = el.value; render(false); });
     on('input[name="env"]', "change", (el) => { d.environment = el.value; render(false); });
@@ -549,14 +556,14 @@ export function createWorkbench({ main, h, render, onCleanup, motion }) {
     try { doc = await getJSON(`/api/workbench/simulations/${encodeURIComponent(id)}`); } catch { return top("Experiment not found", "No experiment has this id on this server.", "", backLink("#/simulations", "Experiments")); }
     await catalog();
     state.doc = doc;
-    const tabs = [["live", doc.status === "running" ? "Live" : "Summary"], ["analytics", "Analytics"], ["negotiations", `Negotiations (${doc.trials.length})`], ["log", "Log"], ["export", "Export"]];
+    const tabs = [["live", doc.status === "running" ? "Live" : "Summary"], ["analytics", "Analysis"], ["negotiations", `Negotiations (${doc.trials.length})`], ["export", "Export"]];
     if (!tabs.some(([k]) => k === state.simTab)) state.simTab = "live";
     const sum = summarize(doc.trials);
     return `${top(doc.config.name, `${esc(doc.config.agents.X.name)} vs ${esc(doc.config.agents.Y.name)} · ${esc(doc.config.environment.name)} · started <time data-ago="${doc.created}">${when(doc.created)}</time>`,
-        `${statusBadge(doc.status)}<a class="btn" href="#/report/${doc.id}">${icon("doc")}Report</a>`, backLink("#/simulations", "Experiments"))}
+        statusBadge(doc.status), backLink("#/simulations", "Experiments"))}
       <p class="datalabel ${doc.config.data_kind}">${icon("info")}<span><b>${esc(doc.config.label.split(":")[0])}.</b>${esc(doc.config.label.slice(doc.config.label.indexOf(":") + 1))}</span></p>
-      <div class="runbar"><div class="wb-progress" role="progressbar" aria-label="Negotiations finished" aria-valuemin="0" aria-valuemax="${doc.plan_size}" aria-valuenow="${doc.trials.length}"><i style="transform:scaleX(${doc.trials.length / doc.plan_size})"></i></div>
-        <span class="sub" id="progress-text">${doc.trials.length} of ${doc.plan_size} negotiations · ${elapsed(doc)}${sum.n ? ` · ${pct(sum.agreement_rate)} agreed` : ""}</span></div>
+      ${doc.status !== "running" ? "" : `<div class="runbar"><div class="wb-progress" role="progressbar" aria-label="Negotiations finished" aria-valuemin="0" aria-valuemax="${doc.plan_size}" aria-valuenow="${doc.trials.length}"><i style="transform:scaleX(${doc.trials.length / doc.plan_size})"></i></div>
+        <span class="sub" id="progress-text">${doc.trials.length} of ${doc.plan_size} negotiations · ${elapsed(doc)}${sum.n ? ` · ${pct(sum.agreement_rate)} agreed` : ""}</span></div>`}
       <nav class="tabs" aria-label="Experiment views" id="simtabs">${tabs.map(([k, t]) => `<a href="#/simulation/${doc.id}" data-simtab="${k}"${state.simTab === k ? ' aria-current="page"' : ""}>${t}</a>`).join("")}</nav>
       <div id="simpanel">${simPanel(doc)}</div>`;
   }
@@ -566,32 +573,42 @@ export function createWorkbench({ main, h, render, onCleanup, motion }) {
     if (tab === "live") return livePanel(doc);
     if (tab === "negotiations") return trialsPanel(doc);
     if (tab === "analytics") return analyticsPanel(doc);
-    if (tab === "log") return `<ol class="wb-log">${doc.log.map((l) => `<li class="${l.level}"><span class="mono">${l.t.toFixed(2)} s</span><span>${esc(l.text)}</span></li>`).join("")}</ol>`;
     return exportPanel(doc);
   }
 
   const tape = (doc) => `<div class="otape" aria-label="Finished negotiations by outcome">${doc.trials.map((t) => `<button type="button" class="ot ${t.status === "completed" ? t.outcome : "aborted"}" style="--c:${t.status === "completed" ? OUT_COLOR[t.outcome] : "var(--sunk)"}" data-goto="${t.index}" data-tip="${esc(`#${t.index + 1}: ${t.status === "completed" ? OUTCOME_LABEL[t.outcome] : t.status}${t.rounds ? ` after ${t.rounds} turns` : ""}`)}" aria-label="Negotiation ${t.index + 1}: ${esc(t.status === "completed" ? OUTCOME_LABEL[t.outcome] : t.status)}"></button>`).join("")}${Array.from({ length: Math.max(0, doc.plan_size - doc.trials.length) }, () => '<i class="ot pending"></i>').join("")}</div>`;
   const tapeLegend = (doc) => `<div class="legend ot-legend">${OUTCOMES.map((o) => `<span><i class="ot ${o}" style="--c:${OUT_COLOR[o]}"></i>${OUTCOME_LABEL[o]}</span>`).join("")}${doc.trials.some((t) => t.status !== "completed") ? '<span><i class="ot aborted"></i>Aborted (infrastructure)</span>' : ""}${doc.plan_size > doc.trials.length ? '<span><i class="ot pending"></i>Pending</span>' : ""}</div>`;
+  /** The answer first: what happened, in words, from stored negotiations only. */
+  function answer(doc) {
+    const s = summarize(doc.trials), agreed = s.outcomes.agreed;
+    if (!s.n) return "";
+    const head = agreed === s.n && s.n > 1 ? `All ${s.n} negotiations reached a deal.` : agreed ? `${agreed} of ${s.n} negotiations reached a deal.` : `No deal in ${s.n === 1 ? "this negotiation" : `any of the ${s.n} negotiations`}.`;
+    const byCondition = doc.config.conditions.map((c) => [c, summarize(doc.trials.filter((t) => t.condition === c))]).filter(([, x]) => x.n);
+    return `<section class="answer"><h2>${head}</h2><p>On average they took ${fmt(s.rounds, 1)} turns and captured ${pct(s.rwe)} of the best combined value possible. The less satisfied side ended with ${Math.round(s.ew * 100)} of its 100 points.</p>
+      ${byCondition.length > 1 ? `<ul class="findings">${byCondition.map(([c, x]) => `<li><b>${COND_NAME[c]} instructions:</b> ${pct(x.agreement_rate)} reached a deal, capturing ${pct(x.rwe)} of the value.</li>`).join("")}</ul>` : ""}
+      <button type="button" class="link" data-findings>See what the data shows${icon("chev-r")}</button></section>`;
+  }
+
   function liveStats(doc) {
-    const s = summarize(doc.trials), c = actionCounts(doc.trials);
+    const s = summarize(doc.trials);
     const tile = (k, v, sub = "") => `<div class="stat"><dt>${k}</dt><dd>${v}</dd>${sub ? `<span class="sub">${sub}</span>` : ""}</div>`;
-    return `<dl class="stats" id="live-stats">${tile("Finished", `${doc.trials.length}<small> / ${doc.plan_size}</small>`)}${tile("Agreed", s.outcomes.agreed, s.n ? pct(s.agreement_rate) : "")}
-      ${tile("Walked away", s.outcomes.walked_away)}${tile("Timed out", s.outcomes.timeout)}${tile("Invalid", s.outcomes.invalid_action)}
-      ${tile("Offers", c.offers, `${c.rejected} rejected · ${c.accepted} accepted`)}${tile("Elapsed", elapsed(doc))}</dl>`;
+    return `<dl class="stats" id="live-stats">${tile("Finished", `${doc.trials.length}<small> / ${doc.plan_size}</small>`)}${tile("Reached a deal", s.outcomes.agreed, s.n ? pct(s.agreement_rate) : "")}${tile("Elapsed", elapsed(doc))}</dl>`;
   }
 
   function livePanel(doc) {
     const cfg = doc.config, live = doc.live;
-    const base = `${liveStats(doc)}<h3 class="wb-h4">${doc.status === "running" ? "Outcomes so far" : "Outcomes"}</h3>${tape(doc)}${tapeLegend(doc)}`;
+    const outcomesBlock = `<h3 class="wb-h4">${doc.status === "running" ? "Outcomes so far" : "How each negotiation ended"}</h3>${tape(doc)}${tapeLegend(doc)}`;
     if (doc.status !== "running" || !live) {
-      return `${base}<section class="block">${doc.error ? notice("warn", "alert", `<b>Stopped by an error.</b> ${esc(doc.error)}`) : ""}
+      return `${doc.error ? notice("warn", "alert", `<b>Stopped by an error.</b> ${esc(doc.error)}`) : ""}${answer(doc)}
         <div class="nextsteps"><button type="button" class="cta" data-simtab-go="analytics">${icon("chart")}Explore the analysis</button><button type="button" class="btn" data-simtab-go="negotiations">Read the negotiations</button><a class="btn" href="#/report/${doc.id}">${icon("doc")}Open the report</a></div>
-        <div class="block-head" style="margin-top:32px"><h2>Configuration</h2></div><dl class="kvs wide"><dt>Agents</dt><dd>X ${esc(cfg.agents.X.name)} (${esc(kindOf(cfg.agents.X.kind)?.label ?? cfg.agents.X.kind)}) · Y ${esc(cfg.agents.Y.name)} (${esc(kindOf(cfg.agents.Y.kind)?.label ?? cfg.agents.Y.kind)})</dd>
+        <section class="block">${outcomesBlock}</section>
+        <details class="rundetails"><summary>Run details</summary><dl class="kvs wide"><dt>Agents</dt><dd>X ${esc(cfg.agents.X.name)} (${esc(kindOf(cfg.agents.X.kind)?.label ?? cfg.agents.X.kind)}) · Y ${esc(cfg.agents.Y.name)} (${esc(kindOf(cfg.agents.Y.kind)?.label ?? cfg.agents.Y.kind)})</dd>
         <dt>Design</dt><dd>${cfg.repetitions} repetition(s) from seed ${cfg.base_seed}; ${cfg.conditions.map((c) => COND_NAME[c]).join(" and ")}; seats swapped ${cfg.swap_seats ? "yes" : "no"}; opener swapped ${cfg.swap_first_mover ? "yes" : "no"}</dd>
-        <dt>Provenance</dt><dd>protocol <code>${esc(doc.provenance.protocol_id)}</code> · code <code>${esc(String(doc.provenance.code_version).slice(0, 12))}</code> · zero-cost mode ${doc.provenance.zero_cost_mode ? "on" : "off"}</dd></dl></section>`;
+        <dt>Provenance</dt><dd>protocol <code>${esc(doc.provenance.protocol_id)}</code> · code <code>${esc(String(doc.provenance.code_version).slice(0, 12))}</code> · zero-cost mode ${doc.provenance.zero_cost_mode ? "on" : "off"}</dd></dl>
+        <h3 class="wb-h4">Log</h3><ol class="wb-log">${doc.log.map((l) => `<li class="${l.level}"><span class="mono">${l.t.toFixed(2)} s</span><span>${esc(l.text)}</span></li>`).join("")}</ol></details>`;
     }
     const sp = live.spec;
-    return `${base}<section class="block live-now"><div class="block-head"><h2>Now: negotiation ${sp.index + 1} of ${doc.plan_size}</h2><span class="note">seed ${sp.seed} · ${COND_NAME[sp.condition]} · Agent ${sp.first_mover} opens</span></div>
+    return `${liveStats(doc)}${outcomesBlock}<section class="block live-now"><div class="block-head"><h2>Now: negotiation ${sp.index + 1} of ${doc.plan_size}</h2><span class="note">seed ${sp.seed} · ${COND_NAME[sp.condition]} · Agent ${sp.first_mover} opens</span></div>
       <div class="wb-split"><div><ol class="wb-turns" id="live-turns">${live.turns.map((t) => turnRow(t, doc, sp.seats)).join("")}</ol>
         <p class="wb-thinking" id="live-thinking" aria-live="polite">${live.thinking ? `<i></i>${esc(seatName(doc, sp.seats, live.thinking.seat))} is deciding turn ${live.thinking.round}…` : ""}</p></div>
       <aside class="sheet wb-aside"><h2 class="wb-h3">At the table</h2><dl class="kvs">${["A", "B"].map((s) => `<dt>Seat ${s}</dt><dd><i class="wb-dot" style="--c:${AGENT_COLOR[sp.seats[s]]}"></i>${esc(seatName(doc, sp.seats, s))}</dd>`).join("")}</dl>
@@ -795,6 +812,7 @@ export function createWorkbench({ main, h, render, onCleanup, motion }) {
     main.querySelectorAll("[data-simtab]").forEach((a) => a.addEventListener("click", (e) => { e.preventDefault(); setTab(a.dataset.simtab); }));
     function wirePanel() {
       panel.querySelectorAll("[data-simtab-go]").forEach((b) => b.addEventListener("click", () => setTab(b.dataset.simtabGo)));
+      panel.querySelector("[data-findings]")?.addEventListener("click", () => { state.af.view = "observations"; setTab("analytics"); });
       panel.querySelector("#cancel-sim")?.addEventListener("click", async (e) => {
         const b = e.currentTarget; b.disabled = true; b.textContent = "Stopping…";
         const res = await post(`/api/workbench/simulations/${id}/cancel`, {});

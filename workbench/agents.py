@@ -257,7 +257,7 @@ def build(defn: dict, display_name: str, variant: str) -> Agent:
 
 BUILTIN = {d["id"]: d for d in (
     {"id": "builtin-concession", "name": "Steady conceder", "kind": "concession", "builtin": True,
-     "notes": "The default scripted agent of the Try-it sandbox.",
+     "notes": "Asks for a lot, then gives ground a little each turn.",
      "params": {"opening_ask": 0.75, "min_ask": 0.35, "concession_step": 0.08, "accept_threshold": 0.55}},
     {"id": "builtin-hardliner", "name": "Hardliner", "kind": "concession", "builtin": True,
      "notes": "Opens high, concedes slowly and accepts only rich offers.",
