@@ -197,12 +197,6 @@ export function flows(trials, stages) {
 export const tally = (values) => values.reduce((m, v) => m.set(v, (m.get(v) ?? 0) + 1), new Map());
 
 /** Which onboarding steps are done, from real records only (built-ins do not count as the user's own). */
-export function journey({ agents = [], environments = [], simulations = [] }) {
-  const done = simulations.filter((s) => s.status === "completed" && s.done > 0);
-  return { agents: agents.some((a) => !a.builtin), resources: environments.some((e) => !e.builtin),
-    experiment: simulations.length > 0, analysis: done.length > 0 };
-}
-
 /** Scale non-negative numbers to whole numbers summing to exactly 100 (largest remainder; equal split when all are 0). */
 export function normalize100(values) {
   const v = values.map((x) => (Number.isFinite(x) && x > 0 ? x : 0)), total = v.reduce((a, b) => a + b, 0);

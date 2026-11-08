@@ -122,7 +122,7 @@ test("480 full-run rows are not complete unless the server's design check passed
 });
 
 // ------------------------------------------------------------------ workbench analytics helpers
-import { boxStats, completedTrials, cumulativeOutcomes, flows, journey, quantile, summarize, tally } from "../dashboard/static/lib.js";
+import { boxStats, completedTrials, cumulativeOutcomes, flows, quantile, summarize, tally } from "../dashboard/static/lib.js";
 
 const T = [
   { index: 0, status: "completed", outcome: "agreed", rwe: 0.9, ew: 0.4, rounds: 3, condition: "baseline_v1" },
@@ -157,12 +157,6 @@ test("cumulativeOutcomes runs in negotiation order; flows count each transition 
   const f = flows(T, [(t) => t.condition, (t) => t.outcome]);
   assert.deepEqual(f.sort((a, b) => b.n - a.n), [{ stage: 0, from: "baseline_v1", to: "agreed", n: 2 }, { stage: 0, from: "structured_v1", to: "walked_away", n: 1 }]);
   assert.deepEqual([...tally(["a", "b", "a"])], [["a", 2], ["b", 1]]);
-});
-
-test("journey: built-ins never count as the user's own work", () => {
-  assert.deepEqual(journey({ agents: [{ builtin: true }], environments: [{ builtin: true }] }), { agents: false, resources: false, experiment: false, analysis: false });
-  assert.deepEqual(journey({ agents: [{}], environments: [{}], simulations: [{ status: "running", done: 1 }] }), { agents: true, resources: true, experiment: true, analysis: false });
-  assert.equal(journey({ simulations: [{ status: "completed", done: 4 }] }).analysis, true);
 });
 
 import { actionCounts, normalize100 } from "../dashboard/static/lib.js";
