@@ -17,3 +17,5 @@ sandbox_runs/
 .impeccable/
 # Offline simulation database (recreated by scripts/run_offline_simulation.py)
 artifacts/offline_simulation/*.db
+# Local Claude Code settings and progress tracker (per-machine)
+.claude/
