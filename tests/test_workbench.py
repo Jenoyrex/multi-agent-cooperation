@@ -250,3 +250,10 @@ def test_the_demo_refuses_to_delete_the_workbench_database(tmp_path, monkeypatch
     with pytest.raises(SystemExit, match="own database"):
         demo.main()
     assert real.read_bytes() == b"saved agents"
+
+
+@pytest.mark.parametrize("text", ["name: T\nrounds: \u00b2", "name: T\nresources: food=\u00b2"])
+def test_text_import_rejects_non_ascii_digits(text):
+    # "²" passes str.isdigit() but int() cannot read it; it must be a clear WorkbenchError, not a crash.
+    with pytest.raises(WorkbenchError, match="whole number"):
+        E.parse("text", text)
