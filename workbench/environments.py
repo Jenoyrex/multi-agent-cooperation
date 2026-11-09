@@ -147,7 +147,7 @@ def parse_text(text: str) -> dict:
         if key in ("name", "description"):
             doc[key] = value
         elif key in ("rounds", "max_rounds"):
-            if not value.isdigit():
+            if not (value.isascii() and value.isdigit()):
                 raise WorkbenchError(f"Line {n}: rounds must be a whole number.", f"line {n}")
             doc["max_rounds"] = int(value)
         elif key in ("first", "first_mover"):
@@ -156,7 +156,7 @@ def parse_text(text: str) -> dict:
             pairs = {}
             for item in filter(None, (s.strip() for s in value.split(","))):
                 k, eq, v = item.partition("=")
-                if not eq or not v.strip().isdigit():
+                if not eq or not (v.strip().isascii() and v.strip().isdigit()):
                     raise WorkbenchError(f"Line {n}: write each entry as name=whole number, got “{item}”.", f"line {n}")
                 pairs[k.strip()] = int(v)
             if key == "resources":
