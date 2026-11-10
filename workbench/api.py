@@ -21,7 +21,8 @@ ID = r"([0-9a-f]{12}|builtin-[a-z-]+)"
 # (the server would call programs on its own host), experiments are small and share the demo's start limit, and the
 # oldest entries are pruned so storage stays bounded. Everything is visible to every visitor.
 DEMO_MAX_SAVED, DEMO_MAX_NEGOTIATIONS, DEMO_KEEP_SIMULATIONS = 40, 48, 30
-DEMO_NO_HTTP = "Local HTTP agents are switched off in the public demo: the server would call a program on its own machine."
+LOCAL_ONLY = ("http_local", "local_llm")
+DEMO_NO_HTTP = "Local HTTP agents and local LLMs are switched off in the public demo: the server would call a program on its own machine."
 
 
 def _usage() -> dict:
@@ -56,7 +57,7 @@ def _sim_header(s: dict) -> dict:
 
 def _kind_public(k) -> dict:
     view = k.public()
-    if demo.enabled() and k.id == "http_local":
+    if demo.enabled() and k.id in LOCAL_ONLY:
         view.update(executable=False, reason=DEMO_NO_HTTP)
     return view
 
@@ -77,6 +78,11 @@ def get(path: str) -> tuple[dict, int]:
     usage = _usage() if path.startswith(("/api/workbench/agents", "/api/workbench/environments", "/api/workbench/overview")) else {}
     if path == "/api/workbench/catalog":
         return catalog(), 200
+    if path == "/api/workbench/local-llm/models":
+        if demo.enabled():  # the public server never looks for a model on its own machine
+            return {"running": False, "models": []}, 200
+        from workbench.local_llm import installed_models
+        return installed_models(), 200
     if path == "/api/workbench/overview":
         sims = [_sim_header(s) for s in store.all_("simulations")]
         return {"agents": len(A.BUILTIN) + len(store.all_("agents")), "environments": len(E.BUILTIN) + len(store.all_("environments")),
@@ -113,7 +119,7 @@ def _demo_create(table: str, req) -> None:
         return
     if isinstance(req, dict) and req.get("id") is not None:
         raise WorkbenchError("Saved entries cannot be changed in the public demo. Duplicate it to make your own version.", "id", 403)
-    if table == "agents" and isinstance(req, dict) and req.get("kind") == "http_local":
+    if table == "agents" and isinstance(req, dict) and req.get("kind") in LOCAL_ONLY:
         raise WorkbenchError(DEMO_NO_HTTP, "kind", 403)
     for old in store.all_(table)[DEMO_MAX_SAVED - 1:]:  # newest first: keep room for this one
         store.delete(table, old["id"])
@@ -124,7 +130,7 @@ def _demo_start(req) -> None:
     if not demo.enabled():
         return
     cfg = S.validate(req)
-    if any(d["kind"] == "http_local" for d in cfg["agents"].values()):
+    if any(d["kind"] in LOCAL_ONLY for d in cfg["agents"].values()):
         raise WorkbenchError(DEMO_NO_HTTP, "agents", 403)
     if cfg["total"] > DEMO_MAX_NEGOTIATIONS:
         raise WorkbenchError(f"This design has {cfg['total']} negotiations; the public demo runs at most {DEMO_MAX_NEGOTIATIONS}.", "repetitions")

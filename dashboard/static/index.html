@@ -60,6 +60,7 @@ document.querySelector('meta[name="theme-color"]').content=t==="dark"?"#0b0b0d":
       <span><b>Cooperation Lab</b></span>
     </a>
     <nav aria-label="Primary">
+      <i class="nav-marker" aria-hidden="true"></i>
       <a href="#/" data-route="start">Home</a>
       <a href="#/simulations" data-route="simulations">Experiments</a>
       <a href="#/agents" data-route="agents">Agents</a>
@@ -91,6 +92,7 @@ document.querySelector('meta[name="theme-color"]').content=t==="dark"?"#0b0b0d":
       <a class="cta" href="#/simulations/new">New experiment</a>
     </div>
   </header>
+  <div id="routebar" aria-hidden="true"></div>
   <main id="main" tabindex="-1"><div class="boot" role="status"><div class="scanner"></div>Opening the lab…</div></main>
 </div>
 <div id="tip" class="tip" role="tooltip" hidden></div>

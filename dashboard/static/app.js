@@ -11,6 +11,8 @@ const reducedMotion = () => document.documentElement.dataset.motion === "reduce"
 const motionOn = () => Boolean(M) && !reducedMotion() && !document.hidden;
 const EASE = [0.16, 1, 0.3, 1]; // exponential ease-out, no overshoot
 const field = createField(document.getElementById("field"));
+const marker = document.querySelector(".nav-marker");
+field.page(location.hash.replace(/^#\/?/, "").split("/")[0]); // the background is alive while the first page loads
 let cleanups = []; // stop inView/scroll observers and timers of the previous view
 const later = (fn, ms) => { const id = setTimeout(fn, ms); cleanups.push(() => clearTimeout(id)); };
 
@@ -80,24 +82,42 @@ function parse() {
   const [, name = "", ...rest] = location.hash.replace(/^#/, "").split("/");
   return { name, arg: decodeURIComponent(rest.join("/")) };
 }
+let renderToken = 0, slowTimer = 0;
+/** The highlight under the current link glides from wherever it is now, so quick clicks redirect it. */
+function moveMarker(smooth) {
+  if (!M) return;
+  const nav = marker.parentElement, cur = nav.querySelector(':scope > a[aria-current="page"]') ?? (nav.querySelector(".navmore [aria-current]") ? nav.querySelector(".navmore summary") : null);
+  marker.style.opacity = cur ? 1 : 0;
+  if (!cur) return;
+  const n = nav.getBoundingClientRect(), r = cur.getBoundingClientRect();
+  M.animate(marker, { x: r.left - n.left, width: r.width }, smooth && motionOn() ? { type: "spring", bounce: 0, duration: 0.4 } : { duration: 0 });
+}
+addEventListener("resize", () => moveMarker(false));
+document.fonts?.ready.then(() => moveMarker(false));
+
 async function render(animate = true) {
+  const token = ++renderToken, root = document.documentElement;
   const { name, arg } = parse();
   const view = Object.hasOwn(routes, name) ? routes[name] : notFound;
   const navKey = NAV_OF[name] ?? name;
   document.querySelectorAll(".rail nav a").forEach((a) => (a.dataset.route === navKey ? a.setAttribute("aria-current", "page") : a.removeAttribute("aria-current")));
   document.querySelector(".navmore").open = false;
+  moveMarker(animate);
   figN = 0;
   cleanups.forEach((f) => f()); cleanups = [];
   field.page(name === "study" ? "overview" : ["live", "result", "negotiation"].includes(name) ? "negotiation" : name);
-  if (name === "negotiation") { main.innerHTML = skeleton(); field.loading(true); }
+  if (name === "negotiation") main.innerHTML = skeleton();
+  field.loading(true);
+  // Fast pages show nothing; only a page that is actually slow gets the progress line. Input stays live throughout.
+  clearTimeout(slowTimer); // a superseded page must not raise the progress line late
+  if (animate) slowTimer = setTimeout(() => root.classList.add("routing"), 120);
   // The public demo says so on every page: shared, temporary, rule-based agents only.
-  const html = (st.demo ? DEMO_BAR : "") + await view(st.snap, arg);
-  field.loading(false);
-  const swap = () => { main.innerHTML = html; wire(name); animateView(name); };
-  if (animate && document.startViewTransition && !document.hidden && !reducedMotion()) {
-    const t = document.startViewTransition(swap);
-    t.ready.catch(() => {}); // aborted transitions still run swap
-  } else swap();
+  let html;
+  try { html = (st.demo ? DEMO_BAR : "") + await view(st.snap, arg); }
+  finally { if (token === renderToken) { clearTimeout(slowTimer); root.classList.remove("routing"); field.loading(false); } }
+  if (token !== renderToken) return; // a newer navigation won: never paint a stale page over it
+  const swap = () => { main.innerHTML = html; wire(name); animateView(name); if (animate) enter(name); };
+  swap();
 }
 window.addEventListener("hashchange", async () => { await render(); window.scrollTo(0, 0); main.focus({ preventScroll: true }); });
 
@@ -128,7 +148,7 @@ function statusLine(s) {
 /** The step that follows this page on the first-visit route. */
 const next = (href, label, why) => `<nav class="next" aria-label="Next step"><a href="${href}">Next: ${esc(label)}${icon("chev-r")}</a><span>${why}</span></nav>`;
 // Workbench pages (dashboard/static/workbench.js) share this file's helpers, router and motion.
-const shellH = { icon, head, blockHead, notice, readout, animateCharts: (root) => animateCharts(root) };
+const shellH = { icon, head, blockHead, notice, readout, animateCharts: (root) => animateCharts(root), field };
 const wb = createWorkbench({ main, h: shellH, render: (animate) => render(animate), onCleanup: (fn) => cleanups.push(fn), motion: { M, on: motionOn, EASE } });
 const ins = createInsights({ main, h: shellH, render: (animate) => render(animate), wb: wb.shared, prefs: createPrefs() });
 Object.assign(routes, wb.routes, ins.routes, { workbench: () => { location.replace("#/"); return ""; } });
@@ -1576,6 +1596,14 @@ function animateCharts(root, watch = (el, fn) => el && cleanups.push(M.inView(el
   });
 }
 
+/** The page arriving: one quiet rise. Only Home gets a staged entrance. */
+function enter(name) {
+  if (!motionOn()) return;
+  if (name !== "") { M.animate(main, { opacity: [0, 1], transform: ["translateY(10px)", "none"] }, { duration: 0.42, ease: EASE }); return; }
+  const items = main.querySelectorAll(".home-hero > *, .how li, .home-truth");
+  M.animate(items, { opacity: [0, 1], transform: ["translateY(16px)", "none"], filter: ["blur(6px)", "blur(0px)"] }, { duration: 0.7, ease: EASE, delay: M.stagger(0.07) });
+}
+
 /** Entrances for the view just rendered. Nothing is pre-hidden: each entrance starts from its first keyframe
  *  just before the element scrolls in (inView with a margin below the viewport), so if a trigger never fires
  *  the content simply stays visible. */
@@ -1804,7 +1832,7 @@ async function boot() {
   try {
     st.sbx = await getJSON("/api/sandbox/info");
     st.demo = st.sbx.public_demo === true;
-    await load(); await render(false);
+    await load(); await render();
   } catch (e) {
     const local = ["localhost", "127.0.0.1"].includes(location.hostname);
     main.innerHTML = head("Cannot reach the lab server", local ? `Start it with <code>PYTHONPATH=. python -m dashboard.server</code>, then reload this page. (${esc(e.message)})`

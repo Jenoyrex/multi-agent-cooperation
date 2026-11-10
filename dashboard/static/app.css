@@ -697,11 +697,7 @@ details.more[open] > summary { margin-bottom: 10px; }
 /* ------------------------------------------------------------ motion */
 @keyframes fadein { from { opacity: 0; } }
 @keyframes tipin { from { opacity: 0; transform: translateY(3px); } }
-::view-transition-old(root) { animation: vt-out .14s ease-in both; }
-::view-transition-new(root) { animation: vt-in .26s var(--ease) both; }
-::view-transition-group(nav-marker) { animation-duration: .32s; animation-timing-function: var(--ease); }
 @keyframes vt-out { to { opacity: 0; } }
-@keyframes vt-in { from { opacity: 0; transform: translateY(4px); } }
 @media (prefers-reduced-motion: reduce) {
   .scanner::after { left: 36%; }
   *, *::before, *::after, ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none !important; transition: none !important; }
@@ -1325,3 +1321,36 @@ a.irow:hover b { color: var(--accent); }
   .stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .stat dd { font-size: 22px; }
 }
+
+
+.setup { display: grid; gap: 22px; max-width: 640px; margin: 0 0 28px; padding: 0 0 0 20px; }
+.setup li > b { display: block; margin-bottom: 4px; }
+.cmd { display: block; width: fit-content; max-width: 100%; margin-top: 8px; padding: 8px 12px; overflow-x: auto; border-radius: var(--r-s); background: var(--panel-2); white-space: nowrap; }
+
+/* ------------------------------------------------------------ motion: arrival, progress, feedback */
+/* No top/left: the marker sits at its static flex position, so nav stays unpositioned and the mobile More menu keeps anchoring to the rail. */
+.rail nav { isolation: isolate; }
+.nav-marker { position: absolute; z-index: -1; width: 0; height: 34px; border-radius: var(--r-s); background: color-mix(in srgb, var(--ink) 9%, transparent); opacity: 0; pointer-events: none; transition: opacity var(--t-fast); }
+
+#routebar { position: fixed; inset: 0 0 auto; z-index: 40; height: 2px; background: var(--accent); transform: scaleX(0); transform-origin: left; opacity: 0; pointer-events: none; transition: opacity .2s ease, transform 0s linear .2s; }
+html.routing #routebar { transform: scaleX(.86); opacity: 1; transition: opacity .12s ease, transform 1.6s var(--ease); }
+main { transition: opacity .2s ease; }
+html.routing main { opacity: .6 !important; }
+
+.navmore[open] .more-menu { transform-origin: top left; animation: materialize .24s var(--ease) both; }
+@keyframes materialize { from { opacity: 0; transform: translateY(-4px) scale(.96); filter: blur(4px); } }
+@media (max-width: 900px) { .navmore[open] .more-menu { transform-origin: top right; } }
+
+.spin { display: inline-block; width: 14px; height: 14px; flex: none; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin .7s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.otape button.pop { animation: pop .36s var(--ease); }
+@keyframes pop { from { opacity: 0; transform: scale(.4); } }
+
+.skel .lines i, .skel .dot { animation: breathe 1.4s ease-in-out infinite; }
+@keyframes breathe { 50% { opacity: .5; } }
+
+a.irow > .icon:last-child, .link .icon { transition: transform var(--t-fast) var(--ease); }
+a.irow:hover > .icon:last-child, .link:hover .icon { transform: translateX(3px); }
+a.irow b { transition: color var(--t-fast); }
+.choice .opt:active { transform: scale(.985); transition: transform .1s ease-out; }
