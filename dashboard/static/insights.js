@@ -14,23 +14,16 @@ export function createInsights({ main, h, render, wb, prefs }) {
 
   // ------------------------------------------------------------ start
   async function start() {
-    let agents, envs, sims;
-    try { [agents, envs, sims] = await Promise.all([getJSON("/api/workbench/agents"), getJSON("/api/workbench/environments"), getJSON("/api/workbench/simulations")]); }
+    let sims;
+    try { sims = await getJSON("/api/workbench/simulations"); }
     catch (e) { return `${top("Cooperation Lab")}${notice("warn", "alert", `The server did not answer (${esc(e.message)}).`)}`; }
     const running = sims.find((s) => s.status === "running");
-    const steps = [["Choose two agents and what they divide", `${agents.filter((a) => a.executable).length} agents and ${envs.length} resource sets ready to use`],
-      ["Run the negotiations", "Watch them live, or let them finish in seconds"],
-      ["Read the results", "Value created, fairness, deals reached, and every transcript"]];
-    const demoMode = (await catalog()).demo;
-    return `<header class="welcome"><h1>See how two negotiating agents share resources when neither knows what the other wants.</h1>
-        <p class="standfirst">${demoMode ? `Run a sample experiment to see it work. This public demo is rule-based only. <a href="#/run-locally">Download and run it yourself</a> to bring your own agents.` : `Run a sample experiment to see it work. Then bring your own agents: free local models, your own API keys, HTTP services or Python files.`}</p>
-        <div class="welcome-actions"><button type="button" class="cta big" id="quick">${icon("play")}Run a sample experiment</button><a class="btn" href="#/simulations/new">Set up your own</a></div>
-        <p class="note">The sample runs 24 negotiations between two built-in rule-based agents. Results are labelled <b>simulated</b>: they show how the lab measures behaviour, not how any AI model behaves.</p>
+    return `<header class="welcome"><h1>See how two AI agents share resources.</h1>
+        <p class="standfirst">Pick two agents, give them something to divide, and see who gets what.</p>
+        <div class="welcome-actions"><button type="button" class="cta big" id="quick">${icon("play")}Run a sample</button><a class="btn" href="#/simulations/new">Set up your own</a></div>
         <p class="step-error" id="quick-error" role="alert" hidden></p></header>
       ${running ? `<a class="runningbar" href="#/simulation/${running.id}">${badge("accent", "await", "Running")}<b>${esc(running.name)}</b><span class="sub">${running.done} of ${running.planned} negotiations</span>${icon("chev-r")}</a>` : ""}
-      <section class="block"><h2 class="vh">How it works</h2><ol class="howstrip">${steps.map(([t, sub], i) => `<li><span class="jmark" aria-hidden="true">${i + 1}</span><div><b>${t}</b><span class="sub">${sub}</span></div></li>`).join("")}</ol></section>
-      ${section("Recent experiments", sims.length ? '<a href="#/simulations">All experiments</a>' : "", sims.length ? experimentList(sims.slice(0, 5)) : empty("No experiments yet", "Run the sample experiment above, or set up your own. They will appear here with their progress and results."))}
-      <section class="block study-link"><a class="irow" href="#/study"><span class="imain"><b>The research study</b><span class="sub">The preregistered Claude vs GPT experiment this lab was built for. It has not been run yet, so there are no results.</span></span>${icon("chev-r")}</a></section>`;
+      ${sims.length ? section("Recent", '<a href="#/simulations">All experiments</a>', experimentList(sims.slice(0, 3))) : ""}`;
   }
 
   // ------------------------------------------------------------ analytics hub
@@ -59,16 +52,16 @@ export function createInsights({ main, h, render, wb, prefs }) {
     const series = [["agreement_rate", "Deals reached", "var(--base)"], ["rwe", "Value created", "var(--struct)"], ["ew", "Fairness", "var(--claude)"]];
     const bars = groupedBars(rows.map(({ d, s }) => ({ label: short(d.config.name), bars: series.map(([k, l, c]) => ({ key: k, label: l, v: s[k], color: c, tip: `${d.config.name}\n${l}: ${k === "agreement_rate" ? pct(s[k]) : fmt(s[k], 2)} (n = ${s.n})` })) })));
     const mix = stackBars(rows.map(({ d, s }) => ({ label: short(d.config.name, 15), n: s.n, parts: OUTCOMES.map((o) => ({ key: o, count: s.outcomes[o], share: s.n ? s.outcomes[o] / s.n : 0, color: OUT_COLOR[o], ink: o === "agreed" || o === "invalid_action" ? "var(--panel)" : "var(--ink)" })) })));
-    const box = boxPlot(rows.map(({ d }, i) => ({ key: d.id, label: short(d.config.name, 18), color: i % 2 ? "var(--struct)" : "var(--base)", stats: boxStats(completedTrials(d.trials).map((t) => t.rwe)) })), { axis: "Value created (RWE) per negotiation" });
+    const box = boxPlot(rows.map(({ d }, i) => ({ key: d.id, label: short(d.config.name, 18), color: i % 2 ? "var(--struct)" : "var(--base)", stats: boxStats(completedTrials(d.trials).map((t) => t.rwe)) })), { axis: "Value created per negotiation" });
     const simulatedOnly = docs.every((d) => d.config.data_kind === "simulated");
     return `${notice("info", "info", `<b>Pooled and descriptive.</b> These totals mix experiments with different agents, resources and designs, so they describe your work so far; they are not a test of anything.${simulatedOnly ? " Every experiment here used rule-based agents: the data is simulated." : ""}${sims.filter((s) => s.done > 0).length > MAX_POOLED ? ` Showing the newest ${MAX_POOLED} experiments.` : ""}`)}
       <dl class="stats">${[["Experiments", docs.length], ["Negotiations", pooled.n]].map(([k, v]) => `<div class="stat"><dt>${k}</dt><dd>${v}</dd></div>`).join("")}</dl>
       <div style="margin-top:12px">${kpis(pooled)}</div>
       <div class="cgrid">${chartCard("Key measures by experiment", "Agreement rate, mean value created and mean fairness for each experiment. Use the legend to show or hide a measure.", bars,
-        { wide: true, lg: toggleLegend(series.map(([k, l, c]) => [k, l, c])), table: dataTable(["Experiment", "n", "Deals reached", "Value created (RWE)", "Fairness (EW)", "Turns"], rows.map(({ d, s }) => [d.config.name, s.n, pct(s.agreement_rate), fmt(s.rwe, 3), fmt(s.ew, 3), fmt(s.rounds, 1)])) })}
+        { wide: true, lg: toggleLegend(series.map(([k, l, c]) => [k, l, c])), table: dataTable(["Experiment", "n", "Deals reached", "Value created", "Fairness", "Turns"], rows.map(({ d, s }) => [d.config.name, s.n, pct(s.agreement_rate), fmt(s.rwe, 3), fmt(s.ew, 3), fmt(s.rounds, 1)])) })}
         ${chartCard("Outcome mix", "How each experiment's negotiations ended.", mix, { lg: `<div class="legend">${OUTCOMES.map((o) => `<span><i class="sw" style="--c:${OUT_COLOR[o]}"></i>${OUTCOME_LABEL[o]}</span>`).join("")}</div>` })}
         ${chartCard("Spread of value created", "Each row is one experiment: the box holds its middle half of negotiations, the line its median.", box)}</div>
-      ${section("Experiments", "Select one for its full analysis.", `<div class="table-wrap"><table><thead><tr><th>Experiment</th><th>Data</th><th class="num">n</th><th class="num">Deals reached</th><th class="num">Value created (RWE)</th><th class="num">Fairness (EW)</th><th class="num">Turns</th><th>Status</th></tr></thead><tbody>
+      ${section("Experiments", "Select one for its full analysis.", `<div class="table-wrap"><table><thead><tr><th>Experiment</th><th>Data</th><th class="num">n</th><th class="num">Deals reached</th><th class="num">Value created</th><th class="num">Fairness</th><th class="num">Turns</th><th>Status</th></tr></thead><tbody>
         ${rows.map(({ d, s }) => `<tr class="link" data-href="#/simulation/${d.id}"><td><a href="#/simulation/${d.id}">${esc(d.config.name)}</a><div class="sub">${esc(d.config.agents.X.name)} vs ${esc(d.config.agents.Y.name)} · ${esc(d.config.environment.name)}</div></td>
           <td>${esc(sourceSummary(d))}</td><td class="num">${s.n}</td><td class="num">${pct(s.agreement_rate)}</td><td class="num">${fmt(s.rwe)}</td><td class="num">${fmt(s.ew)}</td><td class="num">${fmt(s.rounds, 1)}</td><td>${statusBadge(d.status)}</td></tr>`).join("")}</tbody></table></div>`)}`;
   }
@@ -94,8 +87,8 @@ export function createInsights({ main, h, render, wb, prefs }) {
         <tr><td>Negotiations</td><td class="num">${sa.n}</td><td class="num">${sb.n}</td><td class="num">—</td></tr>
         ${row("Agreement", "agreement_rate", (v) => pct(v, 1))}${row("Value created (mean RWE)", "rwe", (v) => fmt(v, 3))}${row("Fairness (mean EW)", "ew", (v) => fmt(v, 3))}
         ${row("Turns (mean)", "rounds", (v) => fmt(v, 2))}${row("Walk-aways", "walk_rate", (v) => pct(v, 1))}${row("Invalid actions", "invalid_rate", (v) => pct(v, 1))}</tbody></table></div>
-      <div class="cgrid">${chartCard("Value created", "Distribution per negotiation in each experiment.", box("rwe", "Value created (RWE)"))}
-        ${chartCard("Fairness", "Distribution per negotiation in each experiment.", box("ew", "Fairness (EW)"))}
+      <div class="cgrid">${chartCard("Value created", "Distribution per negotiation in each experiment.", box("rwe", "Value created"))}
+        ${chartCard("Fairness", "Distribution per negotiation in each experiment.", box("ew", "Fairness"))}
         ${chartCard("Outcome mix", "How each experiment's negotiations ended.", mix, { lg: `<div class="legend">${OUTCOMES.map((o) => `<span><i class="sw" style="--c:${OUT_COLOR[o]}"></i>${OUTCOME_LABEL[o]}</span>`).join("")}</div>` })}</div>
       <p class="note" style="margin-top:16px">To compare the two instruction conditions or the two agents inside one experiment, open it: its analysis filters by condition and profiles each agent. <a href="#/simulation/${B.id}">Open B</a> · <a href="#/simulation/${A.id}">Open A</a></p>`;
   }
@@ -181,7 +174,7 @@ export function createInsights({ main, h, render, wb, prefs }) {
     if (name === "") main.querySelector("#quick")?.addEventListener("click", async (e) => {
       const b = e.currentTarget; b.disabled = true; b.innerHTML = '<span class="spin" aria-hidden="true"></span>Starting…';
       const res = await quickStart();
-      if (!res.ok) { b.disabled = false; b.innerHTML = `${icon("play")}Run a sample experiment`; const err = main.querySelector("#quick-error"); err.textContent = res.data.error ?? "The experiment could not start."; err.hidden = false; }
+      if (!res.ok) { b.disabled = false; b.innerHTML = `${icon("play")}Run a sample`; const err = main.querySelector("#quick-error"); err.textContent = res.data.error ?? "The experiment could not start."; err.hidden = false; }
     });
     if (name === "analytics") main.querySelectorAll("[data-cmp]").forEach((el) => el.addEventListener("change", () => { state.cmp[el.dataset.cmp] = el.value; render(false); }));
     if (name === "report") {

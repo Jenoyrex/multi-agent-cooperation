@@ -75,7 +75,7 @@
 }
 
 * { box-sizing: border-box; }
-html { background: var(--ground); scrollbar-color: var(--scale) transparent; -webkit-text-size-adjust: 100%; }
+html { background: var(--ground); scrollbar-color: var(--scale) transparent; scrollbar-gutter: stable; -webkit-text-size-adjust: 100%; }
 body {
   margin: 0; background: var(--ground); color: var(--ink);
   font: 400 15px/1.5 var(--f-ui); letter-spacing: -.006em; font-variant-numeric: tabular-nums lining-nums;
@@ -657,7 +657,6 @@ details.more[open] > summary { margin-bottom: 10px; }
 @media (max-width: 560px) { .glossary dl > div { grid-template-columns: minmax(0, 1fr); } }
 
 /* ------------------------------------------------------------ living background */
-#field { position: fixed; inset: 0; width: 100vw; height: 100vh; z-index: 0; pointer-events: none; }
 .shell { position: relative; z-index: 1; }
 
 /* ------------------------------------------------------------ definitions */
@@ -1437,3 +1436,8 @@ td.metric .sub { display: block; }
 @media print {
   .cibar { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
 }
+
+/* One calm column for the two forms everyone uses. */
+#agent-form, #sim-form, .stepper { max-width: 640px; }
+.wb-params.stack { grid-template-columns: minmax(0, 1fr); }
+#sim-form h2:not(:first-child) { margin-top: 32px; }

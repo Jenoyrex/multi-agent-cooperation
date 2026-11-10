@@ -51,7 +51,6 @@ document.querySelector('meta[name="theme-color"]').content=t==="dark"?"#0b0b0d":
   <symbol id="i-copy" viewBox="0 0 16 16"><rect x="5" y="5" width="8.4" height="8.4" rx="1.4"/><path d="M10.6 5V3.4c0-.5-.4-.9-.9-.9H3.4c-.5 0-.9.4-.9.9v6.3c0 .5.4.9.9.9H5"/></symbol>
   <symbol id="i-trash" viewBox="0 0 16 16"><path d="M2.8 4.3h10.4M6.2 4.3V2.8h3.6v1.5M4.1 4.3l.6 8.9c0 .5.4.8.9.8h4.8c.5 0 .9-.3.9-.8l.6-8.9"/></symbol>
 </svg>
-<canvas id="field" aria-hidden="true"></canvas>
 <a class="skip" href="#main">Skip to content</a>
 <div class="shell">
   <header class="rail">
@@ -64,23 +63,15 @@ document.querySelector('meta[name="theme-color"]').content=t==="dark"?"#0b0b0d":
       <a href="#/" data-route="start">Home</a>
       <a href="#/simulations" data-route="simulations">Experiments</a>
       <a href="#/agents" data-route="agents">Agents</a>
-      <a href="#/environments" data-route="environments">Resources</a>
       <details class="navmore">
         <summary>More</summary>
         <div class="more-menu">
-          <a href="#/analytics" data-route="analytics">Compare experiments</a>
-          <a href="#/reports" data-route="reports">Reports</a>
-          <a href="#/try" data-route="try">Try one negotiation</a>
-          <a href="#/compare" data-route="compare">Compare runs</a>
-          <a href="#/lab" data-route="lab">Agent Lab</a>
+          <a href="#/environments" data-route="environments">Resources</a>
           <a href="#/models" data-route="models">Model connections</a>
-          <span>Research study</span>
-          <a href="#/study" data-route="study">Overview</a>
-          <a href="#/experiments" data-route="experiments">Data collection <b class="count" id="nav-status" title="Controlled negotiations recorded"></b></a>
-          <a href="#/results" data-route="results">Results</a>
-          <a href="#/methodology" data-route="methodology">Methodology</a>
-          <a href="#/configuration" data-route="configuration">Configuration</a>
-          <span></span>
+          <a href="#/analytics" data-route="analytics">Compare experiments</a>
+          <a href="#/try" data-route="try">Try one negotiation</a>
+          <a href="#/lab" data-route="lab">Agent Lab</a>
+          <a href="#/study" data-route="study">Research study <b class="count" id="nav-status" title="Controlled negotiations recorded"></b></a>
           <a href="#/settings" data-route="settings">Settings</a>
           <a href="#/help" data-route="help">Help</a>
         </div>
