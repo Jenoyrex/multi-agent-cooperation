@@ -26,5 +26,12 @@ testpaths = ["tests"]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
+[project.scripts]
+cooperation-lab = "sandbox.cli:main"
+
 [tool.setuptools.packages.find]
-where = ["src"]
+where = ["."]
+include = ["src*", "dashboard*", "lab*", "workbench*", "sandbox*"]
+
+[tool.setuptools.package-data]
+dashboard = ["static/*", "static/**/*"]

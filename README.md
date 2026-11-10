@@ -1,16 +1,98 @@
-# Multi-Agent Cooperation: Resource-Split Negotiation Game
+# Cooperation Lab
 
-**Live demo: [Open Cooperation Lab](https://cooperation-lab.onrender.com/)**, hosted on Render's free tier.
-The demo runs **rule-based demo agents only** and keeps its data in a **temporary, shared** workspace: everyone
-sees what others create, and everything is wiped when the service restarts or idles. The first visit after
-idling can take up to a minute while the service wakes.
+**Live demo: [Open Cooperation Lab](https://cooperation-lab.onrender.com/)**, hosted on Render's free tier. The demo runs
+**rule-based agents only**, in a temporary workspace shared with other visitors. To test your own agents or AI models, run the
+lab on your own computer (below). The first visit after idling can take up to a minute.
 
 [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/Jenoyrex/multi-agent-cooperation)
 
-> **Demo output is not research data.** Every experiment in the public demo uses rule-based agents and is
+This repository holds two separate things:
+
+- **The sandbox platform**: an open AI-agent sandbox you install and run on your own computer. Bring your own agents, add
+  resources, run experiments, and get honest analysis of how the agents behave, negotiate and share. Everything from
+  here to "The research study" describes it.
+- **[The research study](#the-research-study)**: a preregistered study of Claude and GPT, frozen and separate. It has not
+  been run. Sandbox results are exploratory and are never the study's results.
+
+## Install and run on your own computer
+
+Needs Python 3.10 or newer. Works the same on Windows, macOS and Linux.
+
+```bash
+python -m venv .venv
+# Windows:        .venv\Scripts\activate
+# macOS / Linux:  source .venv/bin/activate
+pip install git+https://github.com/Jenoyrex/multi-agent-cooperation
+cooperation-lab
+```
+
+The app starts on `http://127.0.0.1` and opens your browser. Options: `--port 9000`, `--no-browser`, and `--host` (only if
+you really want other machines to reach it). Your data stays in `~/.cooperation-lab`, or wherever `COOPERATION_LAB_HOME` points.
+
+**Free local models (optional).** Install one, and the app finds it on this computer:
+
+- [Ollama](https://ollama.com): after installing, run `ollama pull llama3.2`. Default address `http://localhost:11434/v1`.
+- [LM Studio](https://lmstudio.ai): load a model and start its local server. Default address `http://localhost:1234/v1`.
+
+## What you can do
+
+- **Import agents three ways.** A prompt agent (choose a model and write its instructions, no coding), your own service
+  at an HTTP URL, or a Python file that runs on your computer after you confirm.
+- **Connect models.** Free local models through Ollama or LM Studio, or your own key for OpenAI, Anthropic, Google Gemini or
+  any OpenAI-compatible provider such as Groq or OpenRouter. "Test connection" sends one tiny request, only when you click it.
+- **Compare resource sets.** The same agents and seeds on several sets, and optionally several personas.
+- **Add a resource mid-negotiation** and see how each agent reacts ([protocol](docs/sandbox-protocol.md)).
+- **Read a behaviour profile** of each agent: opening demand, concession speed, share of value, fairness of its offers, how
+  often it walks away or breaks the rules, turns to agreement, whether its messages reveal preferences, and how its
+  demands change after a resource event ([definitions](docs/sandbox-metrics.md)).
+- **Trust the numbers as far as they go.** Repetitions, seeds, 95% intervals, sample sizes, tokens and cost per run. Findings
+  in plain words never claim more than the data shows. Exports (CSV, JSON, Markdown) carry the data source label.
+
+## Privacy and cost
+
+- **Local by default.** The server binds to 127.0.0.1 unless you pass `--host`. Your experiments stay in your data folder.
+- **Keys** are entered in the app, or read from the environment or a local `.env` (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`,
+  `GEMINI_API_KEY`). Keys entered in the app stay in memory until you close it. They are never written to the database,
+  exports, reports or logs, and never sent back to the browser, which shows only `sk-…abcd`. Key routes answer only this
+  computer, same-origin.
+- **You pay your provider directly.** With an API key, you first see a token estimate and a cost from prices you enter (the app
+  never guesses prices), set a hard token cap, and confirm "Run (uses your API key, you pay)". Your agent's turns go
+  to that provider, under its terms. The estimate is rough, and your provider's bill is the real figure.
+- **Python files are not sandboxed from your computer.** Each runs in its own process with no API keys in its environment and
+  a time limit per turn, but with your permissions: it could read your files, including `.env`. Only run files you trust.
+
+## Limitations
+
+- Two agents per negotiation. Labels and profiles are keyed so this can grow; three or more is not built.
+- Prompt agents have been tested against a fake OpenAI-compatible server and a stub Anthropic client only. No real model, local
+  or paid, has been run by the project, so provider-specific problems may remain. Use "Test connection" first.
+- Structured output depends on the model. A reply that isn't valid JSON for the action format is recorded as `invalid_action`, never
+  repaired, so a weak model can show a high rule-breaking rate.
+- A sandbox experiment is not a controlled study. Models change, and a prompt agent's run may not repeat exactly.
+- Install tested on Windows only; macOS and Linux are expected to work but have not been run.
+- The install puts top-level packages named `src`, `lab`, `dashboard`, `workbench` and `sandbox` on your path, so use a virtual environment.
+
+## Public demo
+
+**Live demo: _not deployed yet_.** The link is added here once the Render service is live and has been checked.
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/Jenoyrex/multi-agent-cooperation)
+
+The public site (`PUBLIC_DEMO=1`) is a safe free demo: rule-based agents only, no keys, no model calls, no code execution, clearly
+labelled, with a "Download and run it yourself" page.
+
+## The research study
+
+**Cooperation Lab** began as an experimental research platform for multi-agent negotiation. You configure agents,
+define the resources they divide and how much each agent privately values them, run experiments on a
+fixed negotiation engine, watch them live, and explore automatically computed behavioural analytics.
+Alongside it sits a preregistered research study comparing Claude and GPT, shown read-only.
+
+> **Simulated vs. real-model results.** Every experiment in the public demo uses rule-based agents and is
 > labelled **simulated**: it shows how the lab measures negotiation behaviour, not how any AI model behaves.
-> No AI provider is called anywhere in the demo, and the project spends ₹0. Real-model results would come only
-> from the preregistered study (Claude vs GPT), which has not been run. No such results exist in this repository.
+> No AI provider is called anywhere in the demo, and the project spends ₹0. People who run the lab on their own
+> computer can test real models with free local models or their own API keys, at their own cost. The preregistered
+> study (Claude vs GPT) has not been run, and no real-model results are stored in this repository.
 
 ## In plain words
 
@@ -182,55 +264,6 @@ negotiations, mock or real), `pilot` (≤20 per batch), `full` (480, needs
 `--confirm` and a hard budget). Paid provider calls are also refused unless
 `ALLOW_PAID_PROVIDER_CALLS=1` is set. See `docs/spec.md` for the full policy.
 
-### Running the full study (real API cost)
-
-Run the real smoke test and the pilot first. Each step below validates and
-prints the plan unless `--confirm` is given.
-
-```bash
-cp .env.example .env   # then fill in both API keys
-export ALLOW_PAID_PROVIDER_CALLS=1
-PYTHONPATH=. python scripts/run_pilot.py --full --max-input-tokens-per-call 12000 --max-cost-usd 60 --confirm
-
-# After a stop (same caps, the spend so far is kept):
-PYTHONPATH=. python scripts/run_pilot.py --full --max-input-tokens-per-call 12000 --max-cost-usd 60 --confirm --resume
-
-# Once the rest is done, re-run pairs that transport failures blocked (§8.11):
-PYTHONPATH=. python scripts/run_pilot.py --full --max-input-tokens-per-call 12000 --max-cost-usd 60 --confirm --resume --retry-blocked
-
-PYTHONPATH=. python scripts/run_analysis.py --db results/full.db --out results/analysis.json
-```
-
-The run goes one instance at a time through all 8 cells, sequentially, and
-writes each negotiation to `results/full.db` as it finishes. Calls run one at
-a time, so expect several hours.
-
-### Model availability and cost (checked 2026-11-10)
-
-| Model (§8.15) | Status | Price per 1M tokens, input / output |
-|---|---|---|
-| `claude-sonnet-4-6` | Active, retires not sooner than 2027-02-17 | $3 / $15 |
-| `gpt-4.1-2025-04-14` | **Deprecated, shuts down 2027-01-14** | $2 / $8 |
-
-**The full run has to finish before 2027-01-14**, or the preregistered GPT
-snapshot is gone and §8.15 would need amending. Status and prices come from the
-providers' public documentation. Access for a specific API key is confirmed
-only by the real smoke test.
-
-Estimated cost of the 480 negotiations, before retries and reruns, with token
-counts approximated from the real prompts at 3.5 characters per token:
-
-| Scenario | Calls | Input tokens | Output tokens | Cost |
-|---|---|---|---|---|
-| Short negotiations (4 rounds) | 1,920 | 1.9M | 0.17M | about $7 |
-| Typical (6 rounds) | 2,880 | 3.2M | 0.40M | about $13 |
-| Long (all 10 rounds, long messages) | 4,800 | 8.4M | 1.68M | about $40 |
-
-Observed spend is not known until the pilot has run. The `--max-cost-usd 60`
-cap is a hard stop. The plan's printed worst case (about $802) is the budget
-guard's reservation, assuming every call hits the input ceiling and uses all
-its retries, and is not an expected cost.
-
 ## Running it
 
 Python 3.10+. On Windows, use `py` where `python` is the Microsoft Store stub.
@@ -248,10 +281,6 @@ node --test tests/dashboard_lib.test.mjs        # UI helper tests
 
 # Zero-cost end-to-end Workbench demo:
 PYTHONPATH=. python scripts/run_workbench_demo.py
-
-# Real-model smoke test (3 negotiations, real API cost — needs keys):
-cp .env.example .env   # then fill in your keys
-PYTHONPATH=. python scripts/run_real_smoke_test.py
 ```
 
 To run only the dashboard, `pip install "pydantic>=2.6" "python-dotenv>=1.0"` is enough.
@@ -283,10 +312,12 @@ Open `http://127.0.0.1:8765`, choose **Connect a local LLM**, then pick that mod
 A local model receives the study's frozen instructions and prompt, and its answers go through the same parser as
 the Claude and GPT adapters. Runs are labelled **local LLM** and are exploratory, not the preregistered study.
 
-## Workbench (exploratory, zero cost)
+## Workbench (exploratory)
 
-The dashboard opens on **Start**, a guided path through the **Workspace**:
-Agents, Resources, Experiments, Analytics and Reports.
+The dashboard opens on **Start**, a guided path through the **Workspace**: Agents, Resources, Experiments,
+Analytics and Reports. Every experiment is labelled by what ran ("Rule-based (simulated)", "Local model: name", "API model:
+provider/model") and is stored away from the study's `results/`. The study's own Claude, GPT and Gemini configurations stay locked.
+See [docs/workbench.md](docs/workbench.md).
 
 - Agents: built-in rule-based strategies with adjustable bargaining;
   Claude, GPT and Gemini configurations (saved but locked, never called);
@@ -336,23 +367,24 @@ Render's `$PORT`, health check `/healthz`, `PUBLIC_DEMO=1` and
 hook URL in the `RENDER_DEPLOY_HOOK_URL` repository secret. In this mode the
 site is a **shared presentation demo**:
 
-- **Not an AI evaluation.** Only scripted, rule-based agents run; no AI
-  provider is called and no API key is used. Scripted agents follow fixed
-  rules and ignore the instructions, so their numbers show how the lab
-  measures a negotiation, not how any model negotiates.
-- **Not persistent.** Render's free tier wipes the disk on every restart,
-  deploy or idle spin-down (after about 15 minutes without traffic), and
-  the oldest entries are pruned.
-- **Not private between visitors.** Everything visitors create is visible
-  to all visitors and cannot be edited or deleted.
+- **Not an AI evaluation.** No AI provider is called and no API key is
+  used. Scripted agents follow fixed rules and ignore the instructions,
+  so their numbers show how the lab measures a negotiation, not how any
+  model negotiates. Models, your API keys, HTTP agents and Python files run
+  only in the app on your own computer.
+- **Not persistent.** Only the newest 100 runs of each kind are kept,
+  on the server's local disk; on a host whose disk is wiped on restart
+  (such as a free Render instance) they disappear with every restart.
+- **Not private between visitors.** Recent runs are listed for everyone.
 - **Not a benchmark.** Results are descriptive; no significance test is
   run and no agent is ranked.
 
-The server enforces this itself, whatever the page sends
-(`dashboard/demo.py`, `workbench/api.py`): scripted agents only, local HTTP agents off,
-experiments capped at 48 negotiations, rate-limited run starts, and no
-technical error detail in responses. The research views are unchanged and
-still show only real experiment data (none has been collected yet).
+The server enforces all of this itself, whatever the page sends: scripted
+agents only, no connection probe, no key or model routes, no code
+execution, no non-loopback calls, at most 20 run starts per minute for
+the whole server, and no technical error detail in responses
+(`dashboard/demo.py`). The research views are unchanged and still show
+only real experiment data (none has been collected yet).
 
 ## Limitations
 

@@ -318,10 +318,15 @@ def test_csp_is_same_origin_and_allows_only_the_known_inline_script():
     html = (server.STATIC / "index.html").read_bytes()
     inline = re.findall(rb"<script>(.*?)</script>", html, re.S)
     assert len(inline) == 1  # the theme script; a new inline script needs its hash here too
-    digest = base64.b64encode(hashlib.sha256(inline[0]).digest()).decode()
+    digest = base64.b64encode(hashlib.sha256(inline[0].replace(b"\r\n", b"\n")).digest()).decode()
     assert csp["script-src"] == f"'self' 'sha256-{digest}'"  # no 'unsafe-inline' for scripts
     for src in re.findall(rb'<script src="([^"]+)"', html) + re.findall(rb'<link rel="stylesheet" href="([^"]+)"', html):
         assert not src.startswith((b"http:", b"https:", b"//")), src  # every script and stylesheet is same-origin
+
+
+def test_inline_script_hash_ignores_crlf_line_endings():
+    # The browser hashes the script after newline normalisation, so a CRLF checkout must hash like LF.
+    assert server._inline_script_hashes(b"<script>a\r\nb\rc</script>") == server._inline_script_hashes(b"<script>a\nb\nc</script>")
 
 
 # ---------------------------------------------------------------- /healthz

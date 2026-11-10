@@ -47,6 +47,7 @@ import json
 import math
 import os
 import re
+import sys
 import threading
 import time
 import traceback
@@ -59,10 +60,12 @@ from urllib.parse import parse_qs, urlparse
 from dashboard import demo, sandbox
 from dashboard.data import RESULTS_DIR, Store
 from lab import adapters, evaluation
+from sandbox import api as models_api, keys, policy
 from workbench import api as workbench_api
 from workbench.agents import WorkbenchError
 
 STATIC = Path(__file__).resolve().parent / "static"
+HERO_VIDEO_PATH = "/assets/live%20wally.mp4"
 DEFAULT_HOST, DEFAULT_PORT = "127.0.0.1", 8765
 CONNECTION_TIMEOUT_S = 15  # per socket read/write of one HTTP connection (not the Agent Lab turn deadline)
 MAX_CONNECTIONS = 32       # concurrent request threads; one more connection gets 503 and is closed
@@ -84,9 +87,10 @@ def public_hosts(value: str) -> frozenset:
 
 
 def _inline_script_hashes(html: bytes) -> list[str]:
-    """CSP hashes of index.html's inline scripts, from the bytes as served (so line endings can't break them)."""
-    return [f"'sha256-{base64.b64encode(hashlib.sha256(s).digest()).decode()}'"
-            for s in re.findall(rb"<script>(.*?)</script>", html, re.S)]
+    """CSP hashes of index.html's inline scripts. Browsers hash the script text after the HTML parser has turned
+    CRLF and CR into LF, so the same is done here: a CRLF checkout (Windows, core.autocrlf) must not block the script."""
+    scripts = (s.replace(b"\r\n", b"\n").replace(b"\r", b"\n") for s in re.findall(rb"<script>(.*?)</script>", html, re.S))
+    return [f"'sha256-{base64.b64encode(hashlib.sha256(s).digest()).decode()}'" for s in scripts]
 
 
 # Everything is same-origin. Styles need 'unsafe-inline': the templates use style="" attributes and
@@ -149,11 +153,15 @@ class Handler(SimpleHTTPRequestHandler):
             return "local"
         return "public" if host.lower() in self.public_hosts else None
 
+    def _from_this_computer(self) -> bool:
+        """The client is this machine, asking for this machine by name. Key and model routes require it."""
+        return self.client_address[0] in ("127.0.0.1", "::1", "::ffff:127.0.0.1") and self._host_kind() == "local"
+
     def do_GET(self):
         try:
             return self._get()
         except Exception:  # noqa: BLE001 — always answer (with the security headers); the traceback goes to the server log only
-            traceback.print_exc()
+            print(keys.redact(traceback.format_exc()), file=sys.stderr)
             return self._json({"error": "internal error"}, 500)
 
     def _get(self):
@@ -184,10 +192,24 @@ class Handler(SimpleHTTPRequestHandler):
         if url.path.startswith("/api/lab/evaluations/"):
             ev = evaluation.get(url.path.rsplit("/", 1)[1])
             return self._json(ev) if ev else self._json({"error": "not found"}, 404)
+        if url.path.startswith("/api/models/"):
+            if demo.enabled():  # these routes do not exist in the public demo
+                return self._json({"error": "not found"}, 404)
+            if not self._from_this_computer():
+                return self._json({"error": policy.NOT_LOCAL}, 403)
+            policy.set_request_local(True)
+            return self._json(*models_api.get(url.path))
         if url.path.startswith("/api/workbench/"):
+            policy.set_request_local(self._from_this_computer())
             return self._json(*workbench_api.get(url.path))
         if url.path.startswith("/api/"):
             return self._json({"error": "not found"}, 404)
+        if url.path == HERO_VIDEO_PATH and not (STATIC / "assets" / "live wally.mp4").exists():
+            # The optional local hero video never ships: answer "no content" so the page falls back to its still without a console 404.
+            self.send_response(204)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return None
         return super().do_GET()
 
     def _drain(self, length: int) -> None:
@@ -217,7 +239,8 @@ class Handler(SimpleHTTPRequestHandler):
         path = urlparse(self.path).path
         limit = UPLOAD_BODY_BYTES if path in UPLOAD_ROUTES else MAX_BODY_BYTES
         length = (int(raw) if len(raw) <= 9 else limit + 1) if raw.isascii() and raw.isdigit() else 0
-        route = None if demo.enabled() and path in DEMO_ABSENT_ROUTES else POST_ROUTES.get(path) or workbench_api.post_route(path)
+        absent = demo.enabled() and (path in DEMO_ABSENT_ROUTES or path.startswith("/api/models/"))
+        route = None if absent else POST_ROUTES.get(path) or workbench_api.post_route(path) or models_api.post_route(path)
         if route is None:  # an absent route does nothing with the body but discard it
             return self._refuse(length, {"error": "method not allowed"}, 405)
         # Starting a run costs money: only this page may do it. A cross-site form or
@@ -230,6 +253,9 @@ class Handler(SimpleHTTPRequestHandler):
                    or (kind == "public" and origin == f"https://{host.lower()}"))
         if not allowed:
             return self._refuse(length, {"error": "cross-origin request refused"}, 403)
+        policy.set_request_local(self._from_this_computer())
+        if path.startswith("/api/models/") and not (self._from_this_computer() and origin == f"http://{host}"):
+            return self._refuse(length, {"error": policy.NOT_LOCAL}, 403)  # stricter here: the page always sends its Origin
         if self.headers.get("Content-Type", "").split(";")[0].strip() != "application/json":
             return self._refuse(length, {"error": "expected application/json"}, 415)
         if not 0 < length <= limit:
@@ -246,11 +272,11 @@ class Handler(SimpleHTTPRequestHandler):
             busy = demo.enabled() and isinstance(exc, sandbox.BusyError)  # local answers keep their 400
             return self._json({"error": str(exc)}, 409 if busy else 400)
         except Exception:  # noqa: BLE001 — always answer; the traceback goes to the server log only
-            traceback.print_exc()
+            print(keys.redact(traceback.format_exc()), file=sys.stderr)
             return self._json({"error": "internal error"}, 500)
 
     def _json(self, payload, status=200, headers=()):
-        body = json.dumps(_clean(payload)).encode()
+        body = keys.redact(json.dumps(_clean(payload))).encode()
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Cache-Control", "no-store")

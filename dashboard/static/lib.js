@@ -196,6 +196,39 @@ export function flows(trials, stages) {
 /** Count of each value, in first-seen order. */
 export const tally = (values) => values.reduce((m, v) => m.set(v, (m.get(v) ?? 0) + 1), new Map());
 
+/** The navigation link each route belongs to. Routes not listed have a link of their own name. */
+export const SECTION = { "": "start", simulation: "simulations", live: "try", result: "try", report: "reports", example: "study",
+  negotiation: "experiments", structured: "results", "run-locally": "help" };
+/** Navigation link of a route. */
+export const navOf = (name) => SECTION[name] ?? name;
+
+/** Negotiations in a wizard draft: every combination of the design. */
+export const designSize = (d) => d.repetitions * d.conditions.length * (d.swap_seats ? 2 : 1) * (d.swap_first_mover ? 2 : 1)
+  * (1 + (d.extra_envs?.length ?? 0)) * Math.max(1, d.personas?.length ?? 0);
+
+/** A wizard draft as the request the server validates. Half-typed prices and empty caps are left out. */
+export function simBody(d) {
+  const { extra_envs: extra = [], consented: _c, prices = {}, caps = {}, ...rest } = d;
+  return { ...rest, ...(extra.length ? { environments: [d.environment, ...extra] } : {}),
+    prices: Object.fromEntries(Object.entries(prices).filter(([, p]) => p?.every((v) => v != null))),
+    caps: Object.fromEntries(Object.entries(caps).filter(([, v]) => v != null)) };
+}
+
+/** A summary from the server as words: the value, then its interval and n. There is no interval to show for fewer than two repetitions. */
+export function fmtCI(s, unit = "share") {
+  const f = (v) => (unit === "turns" ? v.toFixed(1) : `${(v * 100).toFixed(0)}%`);
+  if (s?.mean == null) return { value: "—", detail: "not observed" };
+  return { value: f(s.mean), detail: s.ci ? `95% CI ${f(s.ci[0])} to ${f(s.ci[1])}, n = ${s.n}` : `n = ${s.n}, too few for an interval` };
+}
+
+/** What an experiment's data came from, in words. Experiments saved before the sandbox carry only a data kind. */
+export function sourceSummary(x) {
+  const labels = x.source_labels ?? x.config?.source_labels;
+  if (labels) return [...new Set(Object.values(labels))].join(" vs ");
+  const kind = x.data_kind ?? x.config?.data_kind;
+  return kind === "simulated" ? "Rule-based (simulated)" : kind === "local-llm" ? "Local LLM" : "Local agents";
+}
+
 /** Which onboarding steps are done, from real records only (built-ins do not count as the user's own). */
 /** Scale non-negative numbers to whole numbers summing to exactly 100 (largest remainder; equal split when all are 0). */
 export function normalize100(values) {

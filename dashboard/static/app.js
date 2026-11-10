@@ -1,4 +1,4 @@
-import { CONDITIONS, esc, filterRows, fmt, fullComplete, labStages, mean, modelLabel, OUTCOME_LABEL, OUTCOMES, outcomeShares, pct, phase, refusalMessage, registerSlots, retryAfterSeconds, short, signed, timeAgo, uniq } from "./lib.js";
+import { CONDITIONS, esc, filterRows, fmt, fullComplete, labStages, mean, modelLabel, navOf, OUTCOME_LABEL, OUTCOMES, outcomeShares, pct, phase, refusalMessage, registerSlots, retryAfterSeconds, short, signed, timeAgo, uniq } from "./lib.js";
 import { dataTable, dotPlot, figure, histogram, legend, stackBars } from "./charts.js";
 import { createField } from "./field.js";
 import { createInsights } from "./insights.js";
@@ -74,9 +74,7 @@ async function load() {
 
 // ------------------------------------------------------------------ router
 const routes = { study: home, try: tryit, live: liveView, result: resultView, compare, lab: labView, example,
-  experiments, negotiation: detail, results, structured: comparison, methodology, configuration: setup };
-// Which navigation entry a route belongs to.
-const NAV_OF = { "": "start", example: "study", live: "try", result: "try", negotiation: "experiments", structured: "results" };
+  experiments, negotiation: detail, results, structured: comparison, methodology, configuration: setup, help };
 const notFound = () => `${head("Page not found", `There is no page at <code>${esc(location.hash)}</code> in this lab.`)}<a class="cta" href="#/">Go to Start${icon("chev-r")}</a>`;
 function parse() {
   const [, name = "", ...rest] = location.hash.replace(/^#/, "").split("/");
@@ -99,7 +97,7 @@ async function render(animate = true) {
   const token = ++renderToken, root = document.documentElement;
   const { name, arg } = parse();
   const view = Object.hasOwn(routes, name) ? routes[name] : notFound;
-  const navKey = NAV_OF[name] ?? name;
+  const navKey = navOf(name, arg);
   document.querySelectorAll(".rail nav a").forEach((a) => (a.dataset.route === navKey ? a.setAttribute("aria-current", "page") : a.removeAttribute("aria-current")));
   document.querySelector(".navmore").open = false;
   moveMarker(animate);
@@ -152,8 +150,7 @@ const shellH = { icon, head, blockHead, notice, readout, animateCharts: (root) =
 const wb = createWorkbench({ main, h: shellH, render: (animate) => render(animate), onCleanup: (fn) => cleanups.push(fn), motion: { M, on: motionOn, EASE } });
 const ins = createInsights({ main, h: shellH, render: (animate) => render(animate), wb: wb.shared, prefs: createPrefs() });
 Object.assign(routes, wb.routes, ins.routes, { workbench: () => { location.replace("#/"); return ""; } });
-Object.assign(NAV_OF, wb.nav, ins.nav);
-const DEMO_BAR = `<p class="demobar noprint">Public demo. Everything here is shared with other visitors and erased on restart. <a href="#/settings">Details</a></p>`;
+const DEMO_BAR = `<p class="demobar noprint">Public demo: rule-based agents only, shared with other visitors and erased on restart. <a href="#/run-locally">Run it yourself</a> to test your own agents or AI models.</p>`;
 const pilotNotice = notice("info", "info", "<b>Operational pilot (spec §8.4).</b> Three instances across the eight design cells. Pilot negotiations are excluded from the confirmatory dataset, so treat these values as checks on the harness, not findings.");
 
 function register(rows, seeds, kind) {
@@ -1388,6 +1385,46 @@ function turnDiagram(max) {
   out += `<line class="line" x1="${W - 10 - slot / 2}" x2="${W - 10 - slot / 2}" y1="21" y2="${y - 2}"/><line class="line" x1="${10 + slot / 2}" x2="${10 + slot / 2}" y1="21" y2="${y - 2}"/>`;
   return `<div class="diagram"><svg viewBox="0 0 ${W} ${y + 66}" role="img" aria-label="${max} alternating turns; the last turn is the deadline">${out}</svg></div>`;
 }
+/** Help: what the lab does, how a run works, and the words it uses. Definitions follow docs/spec.md. */
+function help() {
+  const words = [
+    ["Agent", "One of the two negotiators: a built-in rule-based strategy, a prompt agent (a model with your instructions), your own service over HTTP, or your own Python file."],
+    ["Prompt agent", "A model given your instructions, plus what any agent gets: the pool, its own values and the transcript. It never sees the other agent's values. Its reply must be valid JSON; an invalid reply is recorded as an invalid action and never repaired."],
+    ["Model connection", "Where a prompt agent's answers come from: a free model on your computer (Ollama, LM Studio), or a provider with your own API key, which you pay directly."],
+    ["Data source", "Every experiment says what it came from: Rule-based (simulated), Local model, or API model. Sandbox results are exploratory and are never the research study's results."],
+    ["Resource event", "A new resource added at a chosen turn of a negotiation. Each agent gets its own private value for it, any standing offer stops counting, and the deadline stays put unless you move it. The best possible deal (W*) is scored on the pool at the end."],
+    ["Sweep", "The same agents and seeds on several resource sets or personas, so you can compare them fairly."],
+    ["95% interval and n", "n counts repetitions, not negotiations, because negotiations sharing a seed are not independent. The interval is the range of means a bootstrap over those repetitions supports. An interval that crosses zero means the runs can't tell two things apart. Fewer than 10 repetitions is flagged as a small sample."],
+    ["Token cap", "A hard limit for one experiment. Before every call the app checks there is room for that call's worst case, and stops cleanly if not. Your provider's bill is the real figure."],
+    ["Resource set", "What the two agents divide: a few kinds of resource, how many units of each, and how much each agent privately values them. Each agent spreads exactly 100 points over the resources and never sees the other's values. Every unit must be given to one side."],
+    ["Baseline instructions", "<code>baseline_v1</code>: the agents get the rules and their own values, nothing else."],
+    ["Structured instructions", "<code>structured_v1</code>: the same rules plus one fixed block of three steps: say which resources matter most and least to you, trade what you value less for what you value more, and before walking away compare the offer with the zero both get without a deal. It contains no fairness instruction. Rule-based agents ignore instructions, so with them both conditions behave the same."],
+    ...["rwe", "ew", "agreement_rate"].map((k) => [`${{ rwe: "Value created", ew: "Fairness for the worse-off side", agreement_rate: "Deals reached" }[k]} (${DEF[k].name})`, `${esc(DEF[k].plain)} ${esc(DEF[k].what)} ${esc(DEF[k].read)}`]),
+    ["Simulated", "Results from rule-based agents. They show how the lab measures a negotiation, not how any AI model negotiates, and they are never evidence about Claude, GPT or Gemini."],
+  ];
+  return `${head("Help", "Cooperation Lab runs negotiations between two agents that each privately value a shared pool of resources, and measures how much value they create, how fairly it ends up split, and how often they agree.")}
+  <section class="block" style="margin-top:0">${blockHead("How it works")}
+    <ol class="howsteps"><li><b>Choose two agents and a resource set.</b><span>Built-in agents and resource sets are ready to use; you can add your own under <a href="#/agents">Agents &amp; models</a>.</span></li>
+      <li><b>Run the experiment.</b><span>Every negotiation runs on the same fixed engine: the agents take turns to offer a split, accept the offer on the table, or walk away, until a deadline. You can watch it live.</span></li>
+      <li><b>Read the results.</b><span>The lab computes every number from the stored negotiations and both private valuations; agents never report their own scores. Open the report to print it or save it as PDF, or download CSV, JSON or Markdown.</span></li></ol>
+    <a class="cta" href="#/">${icon("play")}Run a sample experiment</a></section>
+  <section class="block">${blockHead("Words used in the lab")}<dl class="helpdl">${words.map(([t, d]) => `<div><dt>${t}</dt><dd>${d}</dd></div>`).join("")}</dl></section>
+  <section class="block">${blockHead("What runs here")}<ul class="plainlist">
+    <li><b>Built-in rule-based strategies</b> run anywhere, at no cost.</li>
+    ${st.demo ? `<li><b>This public demo</b> runs those only. Uploaded Python files are checked by reading their code and never executed. No keys, no model calls. <a href="#/run-locally">Run it on your computer</a> for everything below.</li>` : ""}
+    <li><b>Local models</b> (Ollama, LM Studio) run on your computer, free.</li>
+    <li><b>API models</b> use your own key, and you pay your provider. You see an estimate and set a hard cap first. Keys are never saved, exported or logged.</li>
+    <li><b>HTTP agents</b> are your own services. One on another machine asks you to confirm first.</li>
+    <li><b>Python files</b> run on your computer after you confirm, in a separate process with no keys and a time limit, but with your permissions: only run files you trust.</li>
+    ${st.demo ? "<li><b>This public demo</b> is shared and temporary: everything visitors create is visible to everyone, cannot be edited or deleted, and is erased when the server restarts.</li>" : ""}</ul></section>
+  <section class="block">${blockHead("The research study")}<p>The lab was built for a preregistered study comparing the two instruction conditions with one Claude model and one GPT model: 60 situations, each run 8 ways (2 seatings × 2 first movers × 2 conditions), 480 negotiations in all. <b>It has not been run yet, so there are no results.</b> <a href="#/study">Read about the study</a>.</p></section>
+  <section class="block">${blockHead("More tools")}<ul class="ilist">
+    <li><a class="irow" href="#/try"><span class="imain"><b>Try a single negotiation</b><span class="sub">Set up one negotiation and watch it turn by turn.</span></span>${icon("chev-r")}</a></li>
+    <li><a class="irow" href="#/compare"><span class="imain"><b>Compare single negotiations</b><span class="sub">Put two single negotiations side by side.</span></span>${icon("chev-r")}</a></li>
+    <li><a class="irow" href="#/lab"><span class="imain"><b>Agent Lab</b><span class="sub">A balanced evaluation of two agents with behaviour measurements; it never ranks agents.</span></span>${icon("chev-r")}</a></li>
+    <li><a class="irow" href="#/settings"><span class="imain"><b>Settings</b><span class="sub">Theme, motion, and what the lab will and will not do.</span></span>${icon("chev-r")}</a></li></ul></section>`;
+}
+
 function methodology(s) {
   const c = s.setup, env = c.environment, sci = c.scientific, pv = s.provenance;
   const more = (html) => `<details class="more"><summary>Technical detail</summary>${html}</details>`;
@@ -1807,7 +1844,8 @@ function createPrefs() {
     const go = () => { html.dataset.theme = resolve(t); document.querySelector('meta[name="theme-color"]')?.setAttribute("content", resolve(t) === "dark" ? "#0b0b0d" : "#f5f5f7"); };
     if (!document.startViewTransition || reducedMotion() || html.dataset.theme === resolve(t)) return go();
     html.classList.add("theming");
-    document.startViewTransition(go).finished.finally(() => html.classList.remove("theming"));
+    const vt = document.startViewTransition(go); vt.ready.catch(() => {}); // an aborted transition still paints the theme
+    vt.finished.catch(() => {}).finally(() => html.classList.remove("theming"));
   };
   dark.addEventListener("change", () => { if (read("theme", "system") === "system") paint("system"); });
   const prefs = {
