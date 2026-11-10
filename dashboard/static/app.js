@@ -1,6 +1,5 @@
 import { CONDITIONS, esc, filterRows, fmt, fullComplete, labStages, mean, modelLabel, navOf, OUTCOME_LABEL, OUTCOMES, outcomeShares, pct, phase, refusalMessage, registerSlots, retryAfterSeconds, short, signed, timeAgo, uniq } from "./lib.js";
 import { dataTable, dotPlot, figure, histogram, legend, stackBars } from "./charts.js";
-import { createField } from "./field.js";
 import { createInsights } from "./insights.js";
 import { createWorkbench } from "./workbench.js";
 
@@ -10,7 +9,8 @@ const M = window.Motion;
 const reducedMotion = () => document.documentElement.dataset.motion === "reduce" || matchMedia("(prefers-reduced-motion: reduce)").matches;
 const motionOn = () => Boolean(M) && !reducedMotion() && !document.hidden;
 const EASE = [0.16, 1, 0.3, 1]; // exponential ease-out, no overshoot
-const field = createField(document.getElementById("field"));
+// The animated background is gone; its call sites still say what happened, so they stay as no-ops.
+const field = new Proxy({}, { get: () => () => {} });
 const marker = document.querySelector(".nav-marker");
 field.page(location.hash.replace(/^#\/?/, "").split("/")[0]); // the background is alive while the first page loads
 let cleanups = []; // stop inView/scroll observers and timers of the previous view
@@ -75,6 +75,8 @@ async function load() {
 // ------------------------------------------------------------------ router
 const routes = { study: home, try: tryit, live: liveView, result: resultView, compare, lab: labView, example,
   experiments, negotiation: detail, results, structured: comparison, methodology, configuration: setup, help };
+const STUDY_TABS = [["study", "Overview"], ["experiments", "Data collection"], ["results", "Results"], ["methodology", "Methodology"], ["configuration", "Configuration"]];
+const studyTabs = (name) => (STUDY_TABS.some(([k]) => k === name) ? `<nav class="subnav" aria-label="Research study">${STUDY_TABS.map(([k, t]) => `<a href="#/${k}"${k === name ? ' aria-current="page"' : ""}>${t}</a>`).join("")}</nav>` : "");
 const notFound = () => `${head("Page not found", `There is no page at <code>${esc(location.hash)}</code> in this lab.`)}<a class="cta" href="#/">Go to Start${icon("chev-r")}</a>`;
 function parse() {
   const [, name = "", ...rest] = location.hash.replace(/^#/, "").split("/");
@@ -111,7 +113,7 @@ async function render(animate = true) {
   if (animate) slowTimer = setTimeout(() => root.classList.add("routing"), 120);
   // The public demo says so on every page: shared, temporary, rule-based agents only.
   let html;
-  try { html = (st.demo ? DEMO_BAR : "") + await view(st.snap, arg); }
+  try { html = (st.demo ? DEMO_BAR : "") + studyTabs(name) + await view(st.snap, arg); }
   finally { if (token === renderToken) { clearTimeout(slowTimer); root.classList.remove("routing"); field.loading(false); } }
   if (token !== renderToken) return; // a newer navigation won: never paint a stale page over it
   const swap = () => { main.innerHTML = html; wire(name); animateView(name); if (animate) enter(name); };

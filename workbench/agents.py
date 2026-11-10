@@ -227,7 +227,7 @@ KINDS = {k.id: k for k in (
     Kind("prompt", "Prompt agent (no coding)", "model",
          "Choose a model and write the agent's instructions. It sees what a study agent sees (the public pool, its own values, the "
          "transcript), plus your instructions; never the other agent's values.",
-         (Param("connection", "Model connection", "text", "ollama", "Where the model runs: a local server, or a provider with your own key."),
+         (Param("connection", "Where the model runs", "text", "ollama", "On your computer for free, or with your own API key."),
           Param("model", "Model", "text", "", "The model's name on that connection."),
           Param("persona", "Instructions / personality", "text", "", "Added to the agent's rules. Leave empty for none.", max_len=4000, optional=True),
           Param("temperature", "Temperature", "number", None, "Leave empty to use the provider's default (some models refuse other values).", 0, 2, optional=True),

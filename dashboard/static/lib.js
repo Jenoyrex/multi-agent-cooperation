@@ -198,7 +198,7 @@ export const tally = (values) => values.reduce((m, v) => m.set(v, (m.get(v) ?? 0
 
 /** The navigation link each route belongs to. Routes not listed have a link of their own name. */
 export const SECTION = { "": "start", simulation: "simulations", live: "try", result: "try", report: "reports", example: "study",
-  negotiation: "experiments", structured: "results", "run-locally": "help" };
+  negotiation: "study", structured: "study", experiments: "study", results: "study", methodology: "study", configuration: "study", "run-locally": "help" };
 /** Navigation link of a route. */
 export const navOf = (name) => SECTION[name] ?? name;
 
