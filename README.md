@@ -32,8 +32,8 @@ This repository has two separate parts:
 ## Status: no results yet
 
 - The harness is implemented: the frozen negotiation engine, the preregistered design, metrics and analysis
-  plan (`docs/spec.md` §8), the analysis code (`src/evaluation/inference.py`), a cost-gated pilot driver, the
-  dashboard and the Workbench.
+  plan (`docs/spec.md` §8), the analysis code (`src/evaluation/inference.py`), a cost-gated driver for the pilot
+  and the 480-negotiation full run (tested offline with stub clients only), the dashboard and the Workbench.
 - **No real-model pilot or full run has been carried out.** H1–H3 are untested; there are no effect sizes,
   intervals or p-values.
 - Every number in the repository comes from hand-computed test fixtures, the mock-agent plumbing test, or
@@ -178,12 +178,58 @@ configuration, not the model's specific responses on a re-run.
 ## Cost controls
 
 Three explicit modes (`src/experiments/config.py`): `smoke` (≤5
-negotiations, mock or real), `pilot` (≤20 per batch), `full` (uncapped, but
-requires `run_batch(..., confirmed_full_run=True)` after the cost estimate
-has been printed — calling it without that flag prints the estimate and
-stops, it does not run anything). Paid provider calls are also refused
-unless `ALLOW_PAID_PROVIDER_CALLS` is set. See `docs/spec.md` for the full
-policy.
+negotiations, mock or real), `pilot` (≤20 per batch), `full` (480, needs
+`--confirm` and a hard budget). Paid provider calls are also refused unless
+`ALLOW_PAID_PROVIDER_CALLS=1` is set. See `docs/spec.md` for the full policy.
+
+### Running the full study (real API cost)
+
+Run the real smoke test and the pilot first. Each step below validates and
+prints the plan unless `--confirm` is given.
+
+```bash
+cp .env.example .env   # then fill in both API keys
+export ALLOW_PAID_PROVIDER_CALLS=1
+PYTHONPATH=. python scripts/run_pilot.py --full --max-input-tokens-per-call 12000 --max-cost-usd 60 --confirm
+
+# After a stop (same caps, the spend so far is kept):
+PYTHONPATH=. python scripts/run_pilot.py --full --max-input-tokens-per-call 12000 --max-cost-usd 60 --confirm --resume
+
+# Once the rest is done, re-run pairs that transport failures blocked (§8.11):
+PYTHONPATH=. python scripts/run_pilot.py --full --max-input-tokens-per-call 12000 --max-cost-usd 60 --confirm --resume --retry-blocked
+
+PYTHONPATH=. python scripts/run_analysis.py --db results/full.db --out results/analysis.json
+```
+
+The run goes one instance at a time through all 8 cells, sequentially, and
+writes each negotiation to `results/full.db` as it finishes. Calls run one at
+a time, so expect several hours.
+
+### Model availability and cost (checked 2026-11-10)
+
+| Model (§8.15) | Status | Price per 1M tokens, input / output |
+|---|---|---|
+| `claude-sonnet-4-6` | Active, retires not sooner than 2027-02-17 | $3 / $15 |
+| `gpt-4.1-2025-04-14` | **Deprecated, shuts down 2027-01-14** | $2 / $8 |
+
+**The full run has to finish before 2027-01-14**, or the preregistered GPT
+snapshot is gone and §8.15 would need amending. Status and prices come from the
+providers' public documentation. Access for a specific API key is confirmed
+only by the real smoke test.
+
+Estimated cost of the 480 negotiations, before retries and reruns, with token
+counts approximated from the real prompts at 3.5 characters per token:
+
+| Scenario | Calls | Input tokens | Output tokens | Cost |
+|---|---|---|---|---|
+| Short negotiations (4 rounds) | 1,920 | 1.9M | 0.17M | about $7 |
+| Typical (6 rounds) | 2,880 | 3.2M | 0.40M | about $13 |
+| Long (all 10 rounds, long messages) | 4,800 | 8.4M | 1.68M | about $40 |
+
+Observed spend is not known until the pilot has run. The `--max-cost-usd 60`
+cap is a hard stop. The plan's printed worst case (about $802) is the budget
+guard's reservation, assuming every call hits the input ceiling and uses all
+its retries, and is not an expected cost.
 
 ## Running it
 
@@ -285,8 +331,10 @@ it is added in Render's dashboard.
 `render.yaml` describes the free Render web service that hosts the live
 demo: two pip packages, `python -m dashboard.server --host 0.0.0.0` on
 Render's `$PORT`, health check `/healthz`, `PUBLIC_DEMO=1` and
-`ALLOW_PAID_PROVIDER_CALLS=0`. In this mode the site is a **shared
-presentation demo**:
+`ALLOW_PAID_PROVIDER_CALLS=0`. Every push to `main` triggers a deploy through
+`.github/workflows/deploy-render.yml`, which needs the Render service's deploy
+hook URL in the `RENDER_DEPLOY_HOOK_URL` repository secret. In this mode the
+site is a **shared presentation demo**:
 
 - **Not an AI evaluation.** Only scripted, rule-based agents run; no AI
   provider is called and no API key is used. Scripted agents follow fixed
@@ -350,13 +398,13 @@ multi-agent-cooperation/
 │   ├── environment/               # resource pool, valuations, allocation validation, optimum
 │   ├── negotiation/               # protocol engine (privacy boundary lives here)
 │   ├── evaluation/                # metrics and the §8.9 inference
-│   ├── experiments/               # config, cost gating, batch runner, pilot, provenance
+│   ├── experiments/               # config, cost gating, batch runner, pilot and full-run driver, provenance
 │   └── storage/                   # SQLite persistence
 ├── workbench/                     # Workbench agents, environments, simulations, analytics, exports
 ├── lab/                           # Agent Lab
 ├── dashboard/                     # stdlib server + static UI (research views, Workbench, Agent Lab)
 ├── tests/                         # pytest suite + Node tests for the UI helpers
-├── scripts/                       # smoke tests, pilot, analysis, Workbench demo, offline simulation
+├── scripts/                       # smoke tests, pilot and full run, analysis, Workbench demo, offline simulation
 ├── artifacts/offline_simulation/  # labelled SIMULATED offline outputs
 ├── results/                       # research SQLite DBs (gitignored)
 └── sandbox_runs/                  # Workbench data (gitignored)
