@@ -9,26 +9,26 @@ const MAX_POOLED = 30; // experiments read for pooled analytics (newest first)
 
 export function createInsights({ main, h, render, wb, prefs }) {
   const { icon, notice } = h;
-  const { getJSON, badge, statusBadge, top, backLink, section, empty, chartCard, kpis, outcomeCharts, agentCharts, condTable, experimentList, download, catalog, quickStart, when } = wb;
+  const { getJSON, badge, statusBadge, top, backLink, section, empty, chartCard, kpis, outcomeCharts, agentCharts, condTable, experimentList, kindName, download, catalog, quickStart, when } = wb;
   const state = { cmp: { a: null, b: null }, docs: null };
 
   // ------------------------------------------------------------ start
   async function start() {
-    let sims;
-    try { sims = await getJSON("/api/workbench/simulations"); }
+    let sims, demo;
+    try { [sims, demo] = await Promise.all([getJSON("/api/workbench/simulations"), catalog().then((c) => c.demo)]); }
     catch (e) { return `${top("Cooperation Lab")}${notice("warn", "alert", `The server did not answer (${esc(e.message)}).`)}`; }
     const running = sims.find((s) => s.status === "running");
-    return `<header class="home-hero"><h1>See how two agents negotiate.</h1>
-        <p class="standfirst">Two agents split a shared pile of resources. Each knows only what it wants. Run an experiment to see who reaches a deal, and how fair it is.</p>
-        <div class="home-actions"><button type="button" class="cta big" id="quick">${icon("play")}Run a sample experiment</button><a class="link" href="#/simulations/new">Set up my own${icon("chev-r")}</a></div>
-        <p class="note">Takes about a minute. Free, with no sign-up.</p><p class="step-error" id="quick-error" role="alert" hidden></p></header>
+    return `<header class="home-hero"><h1>See how LLMs negotiate.</h1>
+        <p class="standfirst">A sandbox for testing language models. Give two of them a shared pile of resources, then see how they bargain, how they share, and how fair the result is.</p>
+        <div class="home-actions"><button type="button" class="cta big" id="quick">${icon("play")}Run a sample experiment</button><a class="link" href="#/agents/new/llm">Connect a local LLM${icon("chev-r")}</a></div>
+        <p class="note">The sample takes about a minute, with no sign-up.</p><p class="step-error" id="quick-error" role="alert" hidden></p></header>
       ${running ? `<a class="runningbar" href="#/simulation/${running.id}">${badge("accent", "await", "Running")}<b>${esc(running.name)}</b><span class="sub">${running.done} of ${running.planned} negotiations</span>${icon("chev-r")}</a>` : ""}
       <ol class="how" aria-label="How it works">
-        <li><h2>Pick two strategies</h2><p>Choose how each side bargains, or use the ready-made pair.</p></li>
+        <li><h2>Pick two agents</h2><p>Connect a local LLM, or use a ready-made strategy.</p></li>
         <li><h2>Watch them bargain</h2><p>Turn by turn, each side makes an offer, accepts, or walks away.</p></li>
-        <li><h2>Read the results</h2><p>See the deals, who came out ahead, and what the data shows.</p></li>
+        <li><h2>Read the behaviour</h2><p>See the deals, how resources were shared, and how each side negotiated.</p></li>
       </ol>
-      <p class="note home-truth">The agents here are rule-based programs. Results show how the lab measures negotiation, not how any AI model behaves.</p>
+      <p class="note home-truth">${demo ? "This public demo runs rule-based agents, so its results show how the lab measures negotiation, not how any AI model behaves. To test a real LLM, connect one on your own computer." : "Local LLMs run on your computer at no cost. Results from rule-based agents are labelled simulated."}</p>
       ${sims.length ? section("Recent experiments", `<a class="link" href="#/simulations">All experiments${icon("chev-r")}</a>`, experimentList(sims.slice(0, 3))) : ""}`;
   }
 
@@ -69,7 +69,7 @@ export function createInsights({ main, h, render, wb, prefs }) {
         ${chartCard("Spread of value captured", "Each row is one experiment: the box holds its middle half of negotiations, the line its median.", box)}</div>
       ${section("Experiments", "Select one for its full analysis.", `<div class="table-wrap"><table><thead><tr><th>Experiment</th><th>Data</th><th class="num">n</th><th class="num">Agreement</th><th class="num">Value captured</th><th class="num">Worse-off share</th><th class="num">Turns</th><th>Status</th></tr></thead><tbody>
         ${rows.map(({ d, s }) => `<tr class="link" data-href="#/simulation/${d.id}"><td><a href="#/simulation/${d.id}">${esc(d.config.name)}</a><div class="sub">${esc(d.config.agents.X.name)} vs ${esc(d.config.agents.Y.name)} · ${esc(d.config.environment.name)}</div></td>
-          <td>${d.config.data_kind === "simulated" ? "Simulated" : "Local agents"}</td><td class="num">${s.n}</td><td class="num">${pct(s.agreement_rate)}</td><td class="num">${fmt(s.rwe)}</td><td class="num">${fmt(s.ew)}</td><td class="num">${fmt(s.rounds, 1)}</td><td>${statusBadge(d.status)}</td></tr>`).join("")}</tbody></table></div>`)}`;
+          <td>${kindName(d.config.data_kind).replace(/^./, (c) => c.toUpperCase())}</td><td class="num">${s.n}</td><td class="num">${pct(s.agreement_rate)}</td><td class="num">${fmt(s.rwe)}</td><td class="num">${fmt(s.ew)}</td><td class="num">${fmt(s.rounds, 1)}</td><td>${statusBadge(d.status)}</td></tr>`).join("")}</tbody></table></div>`)}`;
   }
 
   function compareView(docs) {
@@ -104,7 +104,7 @@ export function createInsights({ main, h, render, wb, prefs }) {
     const sims = await getJSON("/api/workbench/simulations");
     const ready = sims.filter((s) => s.done > 0);
     return `${top("Reports", "A printable summary of each experiment: setup, results, charts, interpretation, limitations and provenance. Save one as PDF from your browser's print dialog, or download the data.")}
-      ${ready.length ? `<ul class="ilist">${ready.map((s) => `<li><a class="irow" href="#/report/${s.id}"><span class="filetag">${icon("doc")}</span><span class="imain"><b>${esc(s.name)}</b><span class="sub">${s.done} negotiations · ${s.data_kind === "simulated" ? "simulated" : "local agents"} · ${when(s.created)}</span></span>${statusBadge(s.status)}${icon("chev-r")}</a></li>`).join("")}</ul>`
+      ${ready.length ? `<ul class="ilist">${ready.map((s) => `<li><a class="irow" href="#/report/${s.id}"><span class="filetag">${icon("doc")}</span><span class="imain"><b>${esc(s.name)}</b><span class="sub">${s.done} negotiations · ${kindName(s.data_kind)} ·${when(s.created)}</span></span>${statusBadge(s.status)}${icon("chev-r")}</a></li>`).join("")}</ul>`
         : empty("No reports yet", "A report is ready as soon as an experiment has finished negotiations.", `<a class="cta" href="#/simulations/new">${icon("plus")}Set up an experiment</a>`)}`;
   }
 
@@ -118,7 +118,7 @@ export function createInsights({ main, h, render, wb, prefs }) {
     const resTable = env.source === "generated" ? `<p>Generated by the research generator: ${env.categories} resources with quantities and private values drawn anew for each seed (${cfg.base_seed}–${cfg.base_seed + cfg.repetitions - 1}).</p>`
       : `<div class="table-wrap"><table><thead><tr><th>Resource</th><th>Category</th><th class="num">Quantity</th><th class="num">${esc(names.X)} / A points</th><th class="num">B points</th></tr></thead><tbody>${Object.entries(env.resources).map(([c, q]) => `<tr><td>${esc(c)}</td><td>${esc(env.meta?.[c]?.group ?? "—")}</td><td class="num">${q} ${esc(env.meta?.[c]?.unit ?? "")}</td><td class="num">${env.points.A[c]}</td><td class="num">${env.points.B[c]}</td></tr>`).join("")}</tbody></table></div><p class="note">Points are seat values: with seats swapped, each agent held both A's and B's.</p>`;
     const limits = [
-      cfg.data_kind === "simulated" ? "Simulated data: both agents follow fixed rules. Nothing here is evidence about Claude, GPT, Gemini or any language model." : "Local agents: the results describe the programs that answered on the lab's server, not any named model, and are not a controlled experiment.",
+      cfg.data_kind === "simulated" ? "Simulated data: both agents follow fixed rules. Nothing here is evidence about Claude, GPT, Gemini or any language model." : cfg.data_kind === "local-llm" ? "Local LLM: the results describe how these models answered on this computer. They are exploratory, not the preregistered study." : "Local agents: the results describe the programs that answered on the lab's server, not any named model, and are not a controlled experiment.",
       "Every statistic is descriptive unless marked exploratory; none is the preregistered confirmatory analysis.",
       env.source === "custom" ? "A fixed resource set is one situation however many repetitions ran; results may not carry over to other values." : "Each seed is a different situation; the number of seeds limits how far patterns generalise.",
       ...(Object.keys(a.not_outcomes ?? {}).length ? [`${Object.entries(a.not_outcomes).map(([k, v]) => `${v} ${k}`).join(", ")} negotiation(s) are not outcomes and are excluded.`] : []),

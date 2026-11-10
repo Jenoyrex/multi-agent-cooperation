@@ -61,6 +61,7 @@ Uploaded Python is never executed by the server.
 | `priority` | yes, free | `PriorityAgent`: claims what it values most, concedes, accepts at the deadline |
 | `http_local` | yes, loopback only | Your program behind `http://127.0.0.1…`, Agent Lab protocol; no token stored |
 | `python_upload` | **never** | Your uploaded file, inspected only (see below) |
+| `local_llm` | yes, loopback only | An open model on this computer through Ollama (loopback only); off in the public demo |
 | `claude`, `openai` | **locked** | Adapters exist; zero-cost mode refuses them |
 | `gemini` | **not implemented** | No adapter; the entry records a configuration only |
 

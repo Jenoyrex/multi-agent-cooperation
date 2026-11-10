@@ -176,6 +176,9 @@ class HTTPAgent(Agent):
     def __repr__(self):  # never show the token, even in a traceback
         return f"HTTPAgent({self.name!r}, {self.url!r})"
 
+    def _body(self, view: AgentView) -> bytes:
+        return json.dumps(observation(view, self.instructions_variant)).encode()
+
     def _late(self) -> TransportError:
         return TransportError(f"no reply within {self.timeout_s:g} s")
 
@@ -235,7 +238,7 @@ class HTTPAgent(Agent):
             raise InvalidAgentOutputError(f"reply could not be read as an action ({type(exc).__name__})") from None
 
     async def generate_response(self, view: AgentView) -> NegotiationAction:
-        body = json.dumps(observation(view, self.instructions_variant)).encode()
+        body = self._body(view)
         start, data = time.monotonic(), None
         deadline = start + self.timeout_s
         try:

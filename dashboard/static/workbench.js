@@ -16,6 +16,7 @@ const CAT = {
   mock: { label: "Rule-based", runs: "Simulated · runs free on the lab's server" },
   python: { label: "Built-in Python", runs: "Simulated · runs free on the lab's server" },
   http: { label: "Local HTTP program", runs: "Your program on the lab's server · free" },
+  llm: { label: "Local LLM", runs: "A model on your own computer · free" },
   upload: { label: "Uploaded Python", runs: "Inspected only · never executed here" },
   provider: { label: "External AI provider", runs: "Locked · paid API, never called" },
 };
@@ -73,6 +74,7 @@ export function createWorkbench({ main, h, render, onCleanup, motion }) {
   async function agents(_s, arg) {
     try { await catalog(); } catch (e) { return unavailable(e.message); }
     if (arg === "new") return agentChooser();
+    if (arg === "new/llm") return llmPage();
     if (arg?.startsWith("new/")) return agentNew(arg.slice(4));
     if (arg) return agentDetail(arg);
     const list = await getJSON("/api/workbench/agents");
@@ -83,7 +85,8 @@ export function createWorkbench({ main, h, render, onCleanup, motion }) {
         <span class="imain"><b>${esc(a.name)}</b><span class="sub">${esc(a.kind_label)}${a.builtin ? " · built-in" : ""}${a.history.length ? ` · used in ${a.history.length} experiment${a.history.length === 1 ? "" : "s"}` : ""}</span></span>
         ${runBadge(a)}${icon("chev-r")}</a></li>`).join("")}</ul>`);
     };
-    return `${top("Agents", "The participants in your experiments. Agents on the lab's server run free; external AI providers can be set up but stay locked under the zero-cost policy.", `<a class="cta" href="#/agents/new">${icon("plus")}Add agent</a>`)}
+    return `${top("Agents", "The participants in your experiments: local LLMs on your computer, or ready-made strategies. All of them run free.", `<a class="cta" href="#/agents/new">${icon("plus")}Add agent</a>`)}
+      ${group("Local LLMs", "Open models running on your own computer.", ["llm"])}
       ${group("Runs on the lab's server", "Rule-based and Python strategies, and your own programs on this machine. Results are labelled simulated or local.", ["mock", "python", "http"])}
       ${group("Your uploaded agents", "Python files you uploaded. Each was inspected for the agent interface; none is ever executed by this server.", ["upload"])}
       ${group("External AI providers", "Claude, GPT and Gemini configurations. They never run here: provider APIs are paid, and this project spends nothing.", ["provider"])}
@@ -94,6 +97,7 @@ export function createWorkbench({ main, h, render, onCleanup, motion }) {
     const opt = (href, ic, title, text, tag) => `<a class="choice-card" href="${href}"><span class="cc-icon">${icon(ic)}</span><span class="cc-body"><b>${title}</b><span>${text}</span><span class="cc-tag">${tag}</span></span>${icon("chev-r")}</a>`;
     return `${top("Add an agent", "Choose how your agent is made. You can change its settings later.", "", backLink("#/agents", "Agents"))}
       <div class="choices">
+        ${opt("#/agents/new/llm", "bolt", "Connect a local LLM", "Test an open model such as Llama, Qwen or Mistral, running free on your own computer with Ollama.", state.catalog.demo ? badge("", "lock", "Needs your computer") : badge("good", "ready", "Runs free"))}
         ${opt("#/agents/new/rule", "sliders", "Configure a built-in strategy", "Pick a ready-made negotiating strategy and tune how hard it bargains. Runs instantly on the lab's server.", badge("good", "ready", "Runs free"))}
         ${opt("#/agents/new/upload", "upload", "Upload your own Python agent", "Bring a .py file with your agent class. The lab checks it against the agent interface and registers it.", badge("", "lock", "Inspected, not executed"))}
         ${opt("#/agents/new/provider", "cloud", "Connect an AI provider", "Set up a Claude, GPT or Gemini agent. Provider APIs are paid, so these stay locked here.", badge("warn", "lock", "Locked: zero-cost"))}
@@ -114,7 +118,7 @@ export function createWorkbench({ main, h, render, onCleanup, motion }) {
     const [mode, query = ""] = path.split("?");
     if (mode === "upload") return uploadPage();
     const provider = mode === "provider";
-    const kinds = state.catalog.kinds.filter((k) => (provider ? k.category === "provider" : k.executable));
+    const kinds = state.catalog.kinds.filter((k) => (provider ? k.category === "provider" : k.executable && k.category !== "llm"));
     const want = new URLSearchParams(query).get("kind");
     if (!state.agentDraft || state.agentDraft.for !== mode) state.agentDraft = { for: mode, name: "", notes: "", params: {}, kind: kinds.find((k) => k.id === want)?.id ?? kinds[0].id };
     const d = state.agentDraft, kind = kindOf(d.kind);
@@ -136,6 +140,29 @@ export function createWorkbench({ main, h, render, onCleanup, motion }) {
         <label class="field"><span>Role and notes <span class="sub">(optional)</span></span><textarea rows="3" maxlength="500" data-k="notes" data-field="notes" placeholder="What this agent stands for in your experiment">${esc(d.notes)}</textarea>
           <small class="note">${kind.reads_instructions ? "In an experiment this agent receives the frozen instructions of the chosen condition; custom prompts are never sent. Notes are for you." : "This agent does not read instructions; notes are for you."}</small></label>
         ${test}${errorLine()}
+        <div class="actions"><button type="submit" class="cta">${icon("check")}Save agent</button><a class="btn" href="#/agents">Cancel</a></div>
+      </form>`;
+  }
+
+  /** Local LLM setup: says plainly what is missing, then offers only the models actually installed. */
+  async function llmPage() {
+    const demo = state.catalog.demo, kind = kindOf("local_llm");
+    const found = await getJSON("/api/workbench/local-llm/models").catch(() => ({ running: false, models: [] }));
+    const head = top("Connect a local LLM", "Run an open model on your own computer, then test how it negotiates. Free, and nothing leaves your machine.", "", backLink("#/agents/new", "Add an agent"));
+    const step = (title, body) => `<li><b>${title}</b>${body}</li>`, cmd = (c) => `<code class="cmd">${esc(c)}</code>`;
+    const install = step("Install Ollama", '<span class="sub">Free, from <a href="https://ollama.com/download" target="_blank" rel="noopener">ollama.com/download</a>. Then open it.</span>');
+    const pull = step("Download a model", `<span class="sub">About 2 GB. This one suits most laptops.</span>${cmd("ollama pull llama3.2")}`);
+    if (demo) return `${head}${notice("info", "info", "<b>Local LLMs need the lab running on your computer.</b> This public demo runs on a small free server that cannot run a model, so it uses rule-based agents.")}
+      <ol class="setup">${step("Get the lab", `${cmd("git clone https://github.com/Jenoyrex/multi-agent-cooperation")}${cmd("cd multi-agent-cooperation")}${cmd('pip install "pydantic>=2.6" "python-dotenv>=1.0"')}`)}${install}${pull}${step("Start the lab", `<span class="sub">Then open <code>127.0.0.1:8765</code> and come back to this page.</span>${cmd("python -m dashboard.server")}`)}</ol>`;
+    if (!found.models.length) return `${head}${notice("warn", "alert", found.running ? "<b>Ollama is running, but no models are installed yet.</b>" : "<b>Ollama isn't running on this computer.</b>")}
+      <ol class="setup">${found.running ? "" : install}${pull}</ol><button type="button" class="cta" id="llm-recheck">Check again</button>`;
+    if (state.agentDraft?.for !== "llm") state.agentDraft = { for: "llm", name: found.models[0], notes: "", params: { model: found.models[0] }, kind: kind.id };
+    const d = state.agentDraft, [model, ...advanced] = kind.params;
+    return `${head}<form class="sheet" id="agent-form" novalidate>
+        ${paramField({ ...model, type: "choice", choices: found.models }, d.params.model, false)}
+        <label class="field"><span>Name</span><input type="text" maxlength="60" value="${esc(d.name)}" data-k="name" data-field="name" required></label>
+        <details class="advanced"><summary>Advanced settings</summary>${advanced.map((p) => paramField(p, d.params[p.name], false)).join("")}</details>
+        ${errorLine()}
         <div class="actions"><button type="submit" class="cta">${icon("check")}Save agent</button><a class="btn" href="#/agents">Cancel</a></div>
       </form>`;
   }
@@ -211,6 +238,7 @@ export function createWorkbench({ main, h, render, onCleanup, motion }) {
       if (res.ok) { state.agentDraft = null; location.hash = "#/agents"; } else showError(res, "Could not delete the agent.");
     }));
     if (arg === "new/upload") return wireUpload();
+    main.querySelector("#llm-recheck")?.addEventListener("click", () => render(false));
     const form = main.querySelector("#agent-form");
     if (!form) return;
     const d = state.agentDraft;
@@ -221,6 +249,11 @@ export function createWorkbench({ main, h, render, onCleanup, motion }) {
       const out = form.querySelector(`[data-out="${el.dataset.param}"]`);
       if (out) out.textContent = `${Math.round(Number(el.value) * 100)}%`;
     }));
+    if (arg === "new/llm") { // the name follows the model until the user types their own
+      const model = form.querySelector('[data-param="model"]'), name = form.querySelector('[data-k="name"]');
+      let was = model.value;
+      model.addEventListener("input", () => { if (name.value === was) name.value = d.name = model.value; was = model.value; });
+    }
     form.querySelector("[data-test]")?.addEventListener("click", () => {
       // No request is made: the zero-cost guard refuses provider calls server-side, so a test could only be refused.
       state.test = `Not sent. ${state.catalog.zero_cost ? "Zero-cost mode is on, so this server refuses every paid provider call before anything leaves the lab's server." : "Provider calls are not made from the Workbench."} No credentials were read or used.`;
@@ -448,8 +481,9 @@ export function createWorkbench({ main, h, render, onCleanup, motion }) {
     return `${top("Experiments", "Each experiment runs every negotiation of a design on the unchanged engine, then analyses them automatically. Results are labelled by what actually ran.", `<a class="cta" href="#/simulations/new">${icon("plus")}New experiment</a>`)}
       ${list.length ? experimentList(list) : empty("No experiments yet", "An experiment pairs two agents on a resource set and runs every combination of the design you choose. The first one takes about a minute to set up.", `<a class="cta" href="#/simulations/new">${icon("plus")}Set up an experiment</a>`)}`;
   }
+  const kindName = (k) => ({ simulated: "simulated", "local-llm": "local LLM" })[k] ?? "local agents";
   const experimentList = (list) => `<ul class="ilist">${list.map((s) => `<li><a class="irow" href="#/simulation/${s.id}"><span class="imain"><b>${esc(s.name)}</b>
-      <span class="sub">${esc(s.agents.X)} vs ${esc(s.agents.Y)} · ${esc(s.environment)} · ${s.data_kind === "simulated" ? "simulated" : "local agents"} · ${when(s.created)}</span></span>
+      <span class="sub">${esc(s.agents.X)} vs ${esc(s.agents.Y)} · ${esc(s.environment)} · ${kindName(s.data_kind)} · ${when(s.created)}</span></span>
       <span class="imeta"><span class="mini-prog" role="img" aria-label="${s.done} of ${s.planned} negotiations"><i style="--w:${s.planned ? s.done / s.planned : 0}"></i></span><span class="sub">${s.done}/${s.planned}${s.agreement_rate == null ? "" : ` · ${pct(s.agreement_rate)} agreed`}</span></span>
       ${statusBadge(s.status)}${icon("chev-r")}</a></li>`).join("")}</ul>`;
 
@@ -461,6 +495,7 @@ export function createWorkbench({ main, h, render, onCleanup, motion }) {
     const a = agentList.find((x) => x.id === d.agents.X), b = agentList.find((x) => x.id === d.agents.Y);
     const deaf = a && b && ![a, b].some((x) => kindOf(x.kind).reads_instructions);
     const simulated = a && b && [a, b].every((x) => ["mock", "python"].includes(x.category));
+    const llm = [a, b].some((x) => x?.category === "llm");
     const stepper = `<ol class="stepper" aria-label="Experiment setup">${STEPS.map(([k, t], i) => `<li class="${i < step ? "done" : i === step ? "now" : ""}"><a href="#/simulations/new/${k}"${i === step ? ' aria-current="step"' : ""}><i>${i < step ? icon("check") : i + 1}</i>${t}</a></li>`).join("")}</ol>`;
     const agentPick = (slot) => `<fieldset class="choice"><legend>Agent ${slot}</legend><div class="pickgrid">${agentList.filter((x) => x.executable).map((x) => `<label class="opt"><input type="radio" name="agent-${slot}" value="${x.id}"${x.id === d.agents[slot] ? " checked" : ""}>
         <span><b>${esc(x.name)}</b><small>${esc(x.notes || x.kind_label)}</small></span></label>`).join("")}</div></fieldset>`;
@@ -487,8 +522,9 @@ export function createWorkbench({ main, h, render, onCleanup, motion }) {
         <div><dt>Resources</dt><dd>${esc(env?.name ?? "—")}<span class="sub">${env?.source === "generated" ? "new instance per seed" : "fixed values"} · ${env?.max_rounds ?? "—"} turns</span></dd></div>
         <div><dt>Design</dt><dd>${d.repetitions} repetition${d.repetitions === 1 ? "" : "s"} × ${d.conditions.length} condition${d.conditions.length === 1 ? "" : "s"} × ${d.swap_seats ? 2 : 1} seating${d.swap_seats ? "s" : ""} × ${d.swap_first_mover ? 2 : 1} opener${d.swap_first_mover ? "s" : ""}<span class="sub">seeds ${d.base_seed}${d.repetitions > 1 ? `–${d.base_seed + d.repetitions - 1}` : ""} · ${d.pace === "watch" ? "watch live" : "fast"}</span></dd></div>
         <div><dt>Negotiations</dt><dd><b>${n}</b>${n > lim.negotiations ? ` ${badge("crit", "x", `over the ${lim.negotiations} limit`)}` : ""}</dd></div>
-        <div><dt>Cost and label</dt><dd>₹0 · ${simulated ? "rule-based agents, labelled simulated" : "local agents on the lab's server, labelled local agents"}</dd></div></dl>
+        <div><dt>Cost and label</dt><dd>₹0 · ${simulated ? "rule-based agents, labelled simulated" : llm ? "local LLMs on your computer, labelled local LLM" : "local agents on the lab's server, labelled local agents"}</dd></div></dl>
       ${env?.source === "custom" && a && b && kindOf(a.kind).deterministic && kindOf(b.kind).deterministic && d.repetitions > 1 ? notice("warn", "alert", "Fixed values and repeatable agents: every repetition will replay the first one exactly. Use the research generator for varied situations.") : ""}
+      ${llm ? notice("info", "await", `<b>Local models take time.</b> A turn can take up to a minute on a laptop, so ${n} negotiations may run for a while. You can lower the repetitions under Advanced settings.`) : ""}
       ${deaf && d.conditions.length > 1 ? notice("info", "info", "Neither agent reads instructions, so both conditions will give identical results. That checks the pipeline; it is not a finding.") : ""}
       <details class="advanced" id="wiz-adv"${state.adv ? " open" : ""}><summary>Advanced settings</summary>
       <fieldset class="choice"><legend>Instruction conditions</legend>
@@ -874,6 +910,6 @@ export function createWorkbench({ main, h, render, onCleanup, motion }) {
     nav: { simulation: "simulations" },
     names: ["agents", "environments", "simulations", "simulation"],
     wire,
-    shared: { getJSON, post, badge, statusBadge, top, backLink, section, empty, chartCard, kpis, outcomeCharts, agentCharts, condTable, experimentList, download, catalog, quickStart, runBadge, CAT, when },
+    shared: { getJSON, post, badge, statusBadge, top, backLink, section, empty, chartCard, kpis, outcomeCharts, agentCharts, condTable, experimentList, kindName, download, catalog, quickStart, runBadge, CAT, when },
   };
 }

@@ -222,6 +222,21 @@ run exists; the pilot is never tested. `scripts/run_analysis.py --db
 <full-run db>` runs the same analysis and refuses anything but the
 complete full run.
 
+## Test a local LLM (free)
+
+The Workbench can run open models on your own computer through [Ollama](https://ollama.com/download), so you can
+see how a real language model bargains and shares resources at no cost. This needs the lab running locally; the
+public demo's small server cannot run a model.
+
+```bash
+ollama pull llama3.2
+python -m dashboard.server
+```
+
+Open `http://127.0.0.1:8765`, choose **Connect a local LLM**, then pick that model when you set up an experiment.
+A local model receives the study's frozen instructions and prompt, and its answers go through the same parser as
+the Claude and GPT adapters. Runs are labelled **local LLM** and are exploratory, not the preregistered study.
+
 ## Workbench (exploratory, zero cost)
 
 The dashboard opens on **Start**, a guided path through the **Workspace**:

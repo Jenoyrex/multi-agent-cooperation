@@ -34,6 +34,7 @@ MAX_NEGOTIATIONS, MAX_REPETITIONS = 400, 50
 PACE_S = {"instant": 0.0, "watch": 0.35}  # 'watch' slows turns down so they can be followed; agents answer instantly
 LABELS = {
     "simulated": "SIMULATED: deterministic rule-based agents. Not evidence about Claude, GPT, Gemini or any LLM.",
+    "local-llm": "LOCAL LLM: how these models answered on this computer. Exploratory: not the preregistered study.",
     "local-agents": "LOCAL AGENTS: behaviour of the HTTP programs on this machine, as they answered. Not a controlled "
                     "experiment and not evidence about any named model.",
 }
@@ -85,7 +86,7 @@ def validate(req) -> dict:
     if len(name) > 80:
         raise WorkbenchError("Keep the name under 80 characters.", "name")
     cats = {A.KINDS[d["kind"]].category for d in defs.values()}
-    data_kind = "simulated" if cats <= {"mock", "python"} else "local-agents"
+    data_kind = "simulated" if cats <= {"mock", "python"} else "local-llm" if "llm" in cats else "local-agents"
     order = [c for c in INSTRUCTION_VARIANTS if c in conds]
     return {"name": name, "environment": env, "agents": defs, "conditions": order, "repetitions": reps,
             "base_seed": seed, "swap_seats": swap_seats, "swap_first_mover": swap_first, "pace": pace,

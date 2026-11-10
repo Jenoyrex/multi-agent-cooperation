@@ -3,7 +3,7 @@
 Inferred from the 2026-10-30 redesign brief, without an interview: the brief was exhaustive and asked for no routine approvals. Assumptions are marked *(assumed)*.
 
 ## What it is
-Cooperation Lab: a local, zero-cost platform for multi-agent negotiation experiments. People bring or configure agents, define the resources those agents divide, run simulations on the frozen negotiation engine, and read automatically computed behavioural analytics. A separate, read-only Research area holds the preregistered confirmatory study.
+Cooperation Lab: a zero-cost sandbox for testing how LLMs negotiate: how they respond to resources, share them and bargain. People connect local LLMs through Ollama or configure rule-based agents, define the resources those agents divide, run simulations on the frozen negotiation engine, and read automatically computed behavioural analytics. A separate, read-only Research area holds the preregistered confirmatory study.
 
 ## Who uses it
 University students, researchers and non-technical users. None should need Python, APIs, databases or statistics to finish the ordinary path: add agents → define resources → run an experiment → read the analysis → export.

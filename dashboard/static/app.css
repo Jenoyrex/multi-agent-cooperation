@@ -1325,3 +1325,8 @@ a.irow:hover b { color: var(--accent); }
   .stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .stat dd { font-size: 22px; }
 }
+
+
+.setup { display: grid; gap: 22px; max-width: 640px; margin: 0 0 28px; padding: 0 0 0 20px; }
+.setup li > b { display: block; margin-bottom: 4px; }
+.cmd { display: block; width: fit-content; max-width: 100%; margin-top: 8px; padding: 8px 12px; overflow-x: auto; border-radius: var(--r-s); background: var(--panel-2); white-space: nowrap; }

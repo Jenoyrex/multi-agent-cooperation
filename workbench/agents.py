@@ -6,7 +6,7 @@ knows: `async generate_response(view) -> NegotiationAction`). Adding a provider 
 new Python agent means adding a kind here; the negotiation engine never changes.
 
 Execution follows the zero-cost policy. Only kinds with `executable=True` can run:
-rule-based agents, built-in Python agents, and HTTP agents on this machine (loopback).
+rule-based agents, built-in Python agents, and HTTP or Ollama agents on this machine (loopback).
 Provider kinds can be saved and configured, but stay locked. src/zero_cost.py also
 refuses any real provider client underneath.
 """
@@ -98,7 +98,7 @@ class Param:
 class Kind:
     id: str
     label: str
-    category: str             # mock | python | http | provider
+    category: str             # mock | python | http | llm | upload | provider
     summary: str
     params: tuple
     executable: bool
@@ -143,6 +143,11 @@ def _http_build(name: str, p: dict, variant: str) -> Agent:
     return HTTPAgent(p["url"], name, variant, timeout_s=p["timeout_s"])
 
 
+def _llm_build(name: str, p: dict, variant: str) -> Agent:
+    from workbench.local_llm import OllamaAgent  # local import: only this kind needs it
+    return OllamaAgent(name, p["model"], p["url"], variant, p["timeout_s"])
+
+
 LOCKED = ("Locked by zero-cost mode: real provider calls cost money, so this project never makes them. "
           "The definition can be saved and reviewed; it cannot run.")
 _model = lambda cls: Param("model", "Model", "choice", APPROVED_SCIENTIFIC[cls]["model"],  # noqa: E731
@@ -173,6 +178,13 @@ KINDS = {k.id: k for k in (
          (Param("url", "Endpoint URL", "text", "http://127.0.0.1:8001/turn", "A loopback http:// URL. No token is stored."),
           Param("timeout_s", "Timeout per turn (s)", "number", 10, "Seconds to wait for each answer.", 1, 60)),
          True, reads_instructions=True, deterministic=False, build=_http_build, check=_http_check),  # each request carries the condition's instructions
+    Kind("local_llm", "Local LLM (Ollama)", "llm",
+         "An open model running on your own computer through Ollama. It receives the study's frozen instructions and prompt, "
+         "and its answers are checked by the same parser as the Claude and GPT adapters.",
+         (Param("model", "Model", "text", "llama3.2", "A model you have downloaded with Ollama."),
+          Param("url", "Ollama address", "text", "http://127.0.0.1:11434", "Ollama on this computer. Change it only if you moved Ollama to another port."),
+          Param("timeout_s", "Timeout per turn (s)", "number", 180, "Seconds to wait for each answer. Laptops without a graphics card need longer.", 5, 600)),
+         True, reads_instructions=True, deterministic=False, build=_llm_build, check=_http_check),
     Kind("python_upload", "Uploaded Python agent", "upload",
          "Your own Python file, inspected by reading its syntax tree (workbench/inspect_agent.py). It is never imported "
          "or executed: this server has no isolated sandbox for untrusted code.",
