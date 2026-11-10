@@ -562,7 +562,7 @@ export function createWorkbench({ main, h, render, onCleanup, motion }) {
     form.addEventListener("submit", (e) => e.preventDefault());
     main.querySelector("#launch")?.addEventListener("click", async (e) => {
       const btn = e.currentTarget;
-      btn.disabled = true; btn.textContent = "Starting…";
+      btn.disabled = true; btn.innerHTML = '<span class="spin" aria-hidden="true"></span>Starting…';
       const res = await post("/api/workbench/simulations", d);
       if (res.ok) { state.simTab = "live"; state.simDraft = null; location.hash = `#/simulation/${res.data.id}`; }
       else { btn.disabled = false; btn.innerHTML = `${icon("play")}Try again`; showError(res, "The experiment could not start."); }
@@ -842,6 +842,7 @@ export function createWorkbench({ main, h, render, onCleanup, motion }) {
   function wireSimulation(id) {
     const panel = main.querySelector("#simpanel");
     if (!panel) return;
+    h.field.busy(state.doc.status === "running"); onCleanup(() => h.field.busy(false));
     const paint = () => { panel.innerHTML = simPanel(state.doc); wirePanel(); fade([panel]); };
     const setTab = (k) => { state.simTab = k; main.querySelectorAll("[data-simtab]").forEach((x) => (x.dataset.simtab === k ? x.setAttribute("aria-current", "page") : x.removeAttribute("aria-current"))); paint(); };
     const openTrial = (i) => { state.openTrial = i; setTab("negotiations"); main.querySelector(`#trial-${i}`)?.scrollIntoView({ block: "center" }); main.querySelector(`#trial-${i}`)?.focus({ preventScroll: true }); };
@@ -883,7 +884,7 @@ export function createWorkbench({ main, h, render, onCleanup, motion }) {
       if (tab) tab.textContent = `Negotiations (${doc.trials.length})`;
       const s = summarize(doc.trials);
       main.querySelector("#progress-text").textContent = `${doc.trials.length} of ${doc.plan_size} negotiations · ${elapsed(doc)}${s.n ? ` · ${pct(s.agreement_rate)} agreed` : ""}`;
-      if (doc.status !== "running") { clearInterval(timer); render(false); return; }
+      if (doc.status !== "running") { clearInterval(timer); h.field.refresh(); render(false).then(() => fade([...main.querySelectorAll(".answer > *, .nextsteps")])); return; }
       if (state.simTab !== "live") { if (doc.trials.length !== prev.trials.length && !["export", "analytics"].includes(state.simTab)) paint(); return; }
       const list = main.querySelector("#live-turns");
       if (!list || doc.live?.index !== index) { index = doc.live?.index; paint(); seen = doc.live?.turns.length ?? 0; return; }
@@ -892,7 +893,7 @@ export function createWorkbench({ main, h, render, onCleanup, motion }) {
       const th = doc.live.thinking;
       main.querySelector("#live-thinking").innerHTML = th ? `<i></i>${esc(seatName(doc, doc.live.spec.seats, th.seat))} is deciding turn ${th.round}…` : "";
       main.querySelector("#live-stats").outerHTML = liveStats(doc);
-      if (doc.trials.length !== prev.trials.length) { main.querySelector(".otape").outerHTML = tape(doc); main.querySelector(".ot-legend").outerHTML = tapeLegend(doc); main.querySelectorAll(".otape [data-goto]").forEach((b) => b.addEventListener("click", () => openTrial(+b.dataset.goto))); }
+      if (doc.trials.length !== prev.trials.length) { main.querySelector(".otape").outerHTML = tape(doc); main.querySelector(".otape button:last-of-type")?.classList.add("pop"); main.querySelector(".ot-legend").outerHTML = tapeLegend(doc); main.querySelectorAll(".otape [data-goto]").forEach((b) => b.addEventListener("click", () => openTrial(+b.dataset.goto))); }
     }, 400);
     onCleanup(() => clearInterval(timer));
   }

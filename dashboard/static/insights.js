@@ -171,7 +171,7 @@ export function createInsights({ main, h, render, wb, prefs }) {
   function wire(name, arg) {
     main.querySelectorAll("tr.link[data-href]").forEach((tr) => tr.addEventListener("click", (e) => { if (!e.target.closest("a, button")) location.hash = tr.dataset.href; }));
     if (name === "") main.querySelector("#quick")?.addEventListener("click", async (e) => {
-      const b = e.currentTarget; b.disabled = true; b.textContent = "Starting…";
+      const b = e.currentTarget; b.disabled = true; b.innerHTML = '<span class="spin" aria-hidden="true"></span>Starting…';
       const res = await quickStart();
       if (!res.ok) { b.disabled = false; b.innerHTML = `${icon("play")}Run a sample experiment`; const err = main.querySelector("#quick-error"); err.textContent = res.data.error ?? "The experiment could not start."; err.hidden = false; }
     });
