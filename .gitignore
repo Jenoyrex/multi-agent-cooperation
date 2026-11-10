@@ -19,3 +19,4 @@ sandbox_runs/
 artifacts/offline_simulation/*.db
 # Local Claude Code settings and progress tracker (per-machine)
 .claude/
+build/

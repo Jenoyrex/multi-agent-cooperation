@@ -122,7 +122,37 @@ test("480 full-run rows are not complete unless the server's design check passed
 });
 
 // ------------------------------------------------------------------ workbench analytics helpers
-import { boxStats, completedTrials, cumulativeOutcomes, flows, quantile, summarize, tally } from "../dashboard/static/lib.js";
+import { boxStats, completedTrials, cumulativeOutcomes, designSize, flows, fmtCI, navOf, quantile, simBody, sourceSummary, summarize, tally } from "../dashboard/static/lib.js";
+
+test("designSize multiplies sweeps and personas into the design", () => {
+  const d = { repetitions: 3, conditions: ["a", "b"], swap_seats: true, swap_first_mover: false };
+  assert.equal(designSize(d), 12);
+  assert.equal(designSize({ ...d, extra_envs: ["x", "y"], personas: [] }), 36);
+  assert.equal(designSize({ ...d, extra_envs: [], personas: [{}, {}] }), 24);
+});
+
+test("simBody sends what the server validates: no half-typed prices, empty caps or UI state", () => {
+  const body = simBody({ environment: "e", extra_envs: ["f"], consented: ["api_cost"], prices: { m: [1, 2], n: [1, null] }, caps: { max_tokens: 5, max_cost: null }, repetitions: 1 });
+  assert.deepEqual(body.environments, ["e", "f"]);
+  assert.deepEqual(body.prices, { m: [1, 2] });
+  assert.deepEqual(body.caps, { max_tokens: 5 });
+  assert.ok(!("consented" in body) && !("extra_envs" in body));
+  assert.ok(!("environments" in simBody({ environment: "e", extra_envs: [] })));
+});
+
+test("fmtCI states n and never shows an interval it does not have", () => {
+  assert.deepEqual(fmtCI({ mean: 0.5, ci: [0.25, 0.75], n: 12 }), { value: "50%", detail: "95% CI 25% to 75%, n = 12" });
+  assert.deepEqual(fmtCI({ mean: 0.5, ci: null, n: 1 }), { value: "50%", detail: "n = 1, too few for an interval" });
+  assert.equal(fmtCI({ mean: 3.25, ci: [3, 4], n: 2 }, "turns").value, "3.3");
+  assert.equal(fmtCI({ mean: null, n: 0 }).detail, "not observed");
+});
+
+test("sourceSummary names what the data came from", () => {
+  assert.equal(sourceSummary({ source_labels: { X: "Local model: m", Y: "Rule-based (simulated)" } }), "Local model: m vs Rule-based (simulated)");
+  assert.equal(sourceSummary({ source_labels: { X: "Rule-based (simulated)", Y: "Rule-based (simulated)" } }), "Rule-based (simulated)");
+  assert.equal(sourceSummary({ data_kind: "simulated" }), "Rule-based (simulated)");
+  assert.equal(sourceSummary({ data_kind: "local-agents" }), "Local agents");
+});
 
 const T = [
   { index: 0, status: "completed", outcome: "agreed", rwe: 0.9, ew: 0.4, rounds: 3, condition: "baseline_v1" },
@@ -157,6 +187,14 @@ test("cumulativeOutcomes runs in negotiation order; flows count each transition 
   const f = flows(T, [(t) => t.condition, (t) => t.outcome]);
   assert.deepEqual(f.sort((a, b) => b.n - a.n), [{ stage: 0, from: "baseline_v1", to: "agreed", n: 2 }, { stage: 0, from: "structured_v1", to: "walked_away", n: 1 }]);
   assert.deepEqual([...tally(["a", "b", "a"])], [["a", 2], ["b", 1]]);
+});
+
+test("navOf: a detail page lights the link of its section", () => {
+  assert.equal(navOf(""), "start");
+  assert.equal(navOf("simulation"), "simulations");
+  assert.equal(navOf("report"), "reports");
+  assert.equal(navOf("run-locally"), "help");
+  assert.equal(navOf("models"), "models");
 });
 
 import { actionCounts, normalize100 } from "../dashboard/static/lib.js";

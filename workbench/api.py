@@ -8,6 +8,7 @@ import time
 from typing import Callable, Optional
 
 from dashboard import demo
+from sandbox import experiment, policy
 from src import zero_cost
 from workbench import agents as A, environments as E, export, simulations as S, store
 from workbench.agents import WorkbenchError
@@ -21,7 +22,6 @@ ID = r"([0-9a-f]{12}|builtin-[a-z-]+)"
 # (the server would call programs on its own host), experiments are small and share the demo's start limit, and the
 # oldest entries are pruned so storage stays bounded. Everything is visible to every visitor.
 DEMO_MAX_SAVED, DEMO_MAX_NEGOTIATIONS, DEMO_KEEP_SIMULATIONS = 40, 48, 30
-LOCAL_ONLY = ("http_local", "local_llm")
 DEMO_NO_HTTP = "Local HTTP agents and local LLMs are switched off in the public demo: the server would call a program on its own machine."
 
 
@@ -50,15 +50,17 @@ def _sim_header(s: dict) -> dict:
     done = [t for t in s["trials"] if t["status"] == "completed"]
     return {"id": s["id"], "name": s["config"]["name"], "status": s["status"], "created": s["created"],
             "finished": s.get("finished"), "planned": s["plan_size"], "done": len(s["trials"]),
-            "data_kind": s["config"]["data_kind"], "environment": s["config"]["environment"]["name"],
+            "data_kind": s["config"]["data_kind"], "source_labels": s["config"].get("source_labels"),
+            "environment": s["config"]["environment"]["name"], "sweep": len(s["config"].get("environments") or []) > 1,
+            "stop_reason": s.get("stop_reason"),
             "agents": {k: d["name"] for k, d in s["config"]["agents"].items()},
             "agreement_rate": sum(t["outcome"] == "agreed" for t in done) / len(done) if done else None}
 
 
 def _kind_public(k) -> dict:
     view = k.public()
-    if demo.enabled() and k.id in LOCAL_ONLY:
-        view.update(executable=False, reason=DEMO_NO_HTTP)
+    if demo.enabled() and k.id in A.LOCAL_ONLY:
+        view.update(executable=False, reason=DEMO_NO_HTTP if k.id == "http_local" else policy.DEMO_OFF)
     return view
 
 
@@ -71,6 +73,7 @@ def catalog() -> dict:
             "rules": E.RULES, "exports": export.FILES, "conditions": ["baseline_v1", "structured_v1"],
             "import_formats": {"json": True, "text": True, "yaml": False, "python": False},
             "upload": {"max_bytes": inspect_agent.MAX_SOURCE_BYTES, "executes": False},
+            "local_features": not on and policy.request_is_local(),
             "demo": on, "read_only": False}
 
 
@@ -119,8 +122,8 @@ def _demo_create(table: str, req) -> None:
         return
     if isinstance(req, dict) and req.get("id") is not None:
         raise WorkbenchError("Saved entries cannot be changed in the public demo. Duplicate it to make your own version.", "id", 403)
-    if table == "agents" and isinstance(req, dict) and req.get("kind") in LOCAL_ONLY:
-        raise WorkbenchError(DEMO_NO_HTTP, "kind", 403)
+    if table == "agents" and isinstance(req, dict) and req.get("kind") in A.LOCAL_ONLY:
+        raise WorkbenchError(policy.DEMO_OFF, "kind", 403)
     for old in store.all_(table)[DEMO_MAX_SAVED - 1:]:  # newest first: keep room for this one
         store.delete(table, old["id"])
 
@@ -130,7 +133,7 @@ def _demo_start(req) -> None:
     if not demo.enabled():
         return
     cfg = S.validate(req)
-    if any(d["kind"] in LOCAL_ONLY for d in cfg["agents"].values()):
+    if any(d["kind"] in A.LOCAL_ONLY for d in cfg["agents"].values()):
         raise WorkbenchError(DEMO_NO_HTTP, "agents", 403)
     if cfg["total"] > DEMO_MAX_NEGOTIATIONS:
         raise WorkbenchError(f"This design has {cfg['total']} negotiations; the public demo runs at most {DEMO_MAX_NEGOTIATIONS}.", "repetitions")
@@ -187,6 +190,19 @@ def _inspect(req):
     return inspect_agent.inspect_source(req.get("filename"), req.get("source")), 200
 
 
+def _estimate(req):
+    """What a design could use, and which consents it needs. Sends nothing to any model."""
+    cfg = S.validate(req)
+    est, needed = experiment.estimate(cfg), experiment.required_consents(cfg)
+    try:
+        experiment.check_caps(cfg, est)
+        problem = None
+    except WorkbenchError as exc:
+        problem = exc.payload()
+    return {**est, "required": [{"id": c, "text": experiment.CONSENT_TEXT[c]} for c in needed], "token": experiment.consent_token(cfg) if needed else None,
+            "caps_problem": problem, "source_labels": cfg["source_labels"], "data_kind": cfg["data_kind"], "label": cfg["label"], "total": cfg["total"]}, 200
+
+
 def _start(req):
     _demo_start(req)
     sim = S.start(req)
@@ -204,7 +220,8 @@ def post_route(path: str) -> Optional[Callable]:
              "/api/workbench/environments": _save("environments", E.BUILTIN, E.validate),
              "/api/workbench/environments/preview": _preview,
              "/api/workbench/uploads/inspect": _inspect,
-             "/api/workbench/simulations": _start}
+             "/api/workbench/simulations": _start,
+             "/api/workbench/simulations/estimate": _estimate}
     if path in fixed:
         return fixed[path]
     if m := re.fullmatch(rf"/api/workbench/(agents|environments)/{ID}/delete", path):

@@ -1,7 +1,8 @@
 // Workbench: agents, resources, the experiment wizard, the live workspace and per-experiment analytics.
 // Every value shown comes from /api/workbench/*; the browser only re-describes stored negotiations
 // (lib.js helpers, unit-tested) and computes the size of a design before it starts.
-import { actionCounts, boxStats, completedTrials, cumulativeOutcomes, esc, flows, fmt, normalize100, OUTCOME_LABEL, OUTCOMES, pct, summarize, timeAgo } from "./lib.js";
+import { actionCounts, boxStats, completedTrials, cumulativeOutcomes, designSize, esc, flows, fmt, normalize100, OUTCOME_LABEL, OUTCOMES, pct, simBody, sourceSummary, summarize, timeAgo } from "./lib.js";
+import { createSandboxUI } from "./sandboxui.js";
 import { dataTable, histogram, stackBars } from "./charts.js";
 import { boxPlot, donut, heatmap, lineChart, network, radar, sankey, scatter, stackedArea, timeline, toggleLegend } from "./viz.js";
 
@@ -15,18 +16,23 @@ const STATUS = { running: ["accent", "await", "Running"], completed: ["good", "c
 const CAT = {
   mock: { label: "Rule-based", runs: "Simulated · runs free on the lab's server" },
   python: { label: "Built-in Python", runs: "Simulated · runs free on the lab's server" },
-  http: { label: "Local HTTP program", runs: "Your program on the lab's server · free" },
+  http: { label: "HTTP agent", runs: "Your own program, over HTTP" },
+  model: { label: "Prompt agent", runs: "Free with a local model; with an API key, you pay your provider" },
   llm: { label: "Local LLM", runs: "A model on your own computer · free" },
   upload: { label: "Uploaded Python", runs: "Inspected only · never executed here" },
   provider: { label: "External AI provider", runs: "Locked · paid API, never called" },
 };
 const ACT = { OFFER: "Offer", ACCEPT: "Accept", WALK_AWAY: "Walk away", INVALID: "Invalid" };
 const PROVIDERS = { claude: "Anthropic", openai: "OpenAI", gemini: "Google" };
+// Where a kind runs, for kinds whose category alone doesn't say.
+const RUNS = { python_file: "Runs on your computer, after you confirm", http_remote: "On your own server, after you confirm", http_local: "Your program on this computer · free", prompt: CAT.model.runs };
+const runsOf = (kindId, category) => RUNS[kindId] ?? CAT[category].runs;
+const LOCAL_KINDS = ["prompt", "http_local", "http_remote", "python_file"];
 
 export function createWorkbench({ main, h, render, onCleanup, motion }) {
   const { icon, notice } = h;
   const state = { catalog: null, agentDraft: null, upload: null, envDraft: null, envTab: "visual", importFmt: "text", importText: "",
-    simDraft: null, simTab: "live", openTrial: null, af: { condition: "all", outcome: "all", view: "outcomes" }, test: null };
+    simDraft: null, simTab: "live", openTrial: null, af: { condition: "all", outcome: "all", view: "profile" }, test: null };
 
   // ------------------------------------------------------------ data
   const getJSON = async (url) => { const r = await fetch(url, { cache: "no-store" }); if (!r.ok) throw Object.assign(new Error(`${url} ${r.status}`), { status: r.status }); return r.json(); };
@@ -42,8 +48,8 @@ export function createWorkbench({ main, h, render, onCleanup, motion }) {
   // ------------------------------------------------------------ shared bits
   const badge = (tone, ic, text) => `<span class="badge ${tone}">${icon(ic)}${esc(text)}</span>`;
   const statusBadge = (s) => { const [tone, ic, text] = STATUS[s] ?? ["", "info", s]; return badge(tone, ic, text); };
-  const runBadge = (a) => (a.executable ? badge("good", "ready", "Runs free")
-    : a.category === "upload" ? badge("", "lock", "Inspected, not executed") : a.kind === "gemini" ? badge("", "x", "No adapter") : badge("warn", "lock", "Locked"));
+  const runBadge = (a) => (a.executable ? (a.kind === "prompt" ? badge("good", "ready", "Model") : ["python_file", "http_remote"].includes(a.kind) ? badge("warn", "alert", "Asks before it runs") : badge("good", "ready", "Runs free"))
+    : LOCAL_KINDS.includes(a.kind) ? badge("", "lock", "Runs on your own computer") : a.category === "upload" ? badge("", "lock", "Inspected, not executed") : a.kind === "gemini" ? badge("", "x", "No adapter") : badge("warn", "lock", "Locked"));
   const top = (title, sub = "", actions = "", back = "") => `${back}<header class="page-head split"><div><h1>${esc(title)}</h1>${sub ? `<p class="standfirst">${sub}</p>` : ""}</div>${actions ? `<div class="head-actions">${actions}</div>` : ""}</header>`;
   const backLink = (href, label) => `<a class="back" href="${href}">${icon("chev-l")}${esc(label)}</a>`;
   const section = (title, note = "", body = "", id = "") => `<section class="block"${id ? ` id="${id}"` : ""}><div class="block-head"><h2>${esc(title)}</h2>${note ? `<span class="note">${note}</span>` : ""}</div>${body}</section>`;
@@ -70,9 +76,12 @@ export function createWorkbench({ main, h, render, onCleanup, motion }) {
   const chartCard = (title, what, body, { lg = "", table = "", wide = false } = {}) =>
     `<figure class="ccard${wide ? " wide" : ""}"><figcaption class="ch"><h3>${esc(title)}</h3><p>${what}</p></figcaption>${lg}<div class="cbody">${body}</div>${table}</figure>`;
 
+  const sbx = createSandboxUI({ main, h, render, shared: { getJSON, post, badge, top, backLink, section, catalog } });
+
   // ------------------------------------------------------------ agents
   async function agents(_s, arg) {
     try { await catalog(); } catch (e) { return unavailable(e.message); }
+    state.conns = arg && state.catalog.local_features ? (await getJSON("/api/models/connections")).connections : [];
     if (arg === "new") return agentChooser();
     if (arg === "new/llm") return llmPage();
     if (arg?.startsWith("new/")) return agentNew(arg.slice(4));
@@ -85,61 +94,76 @@ export function createWorkbench({ main, h, render, onCleanup, motion }) {
         <span class="imain"><b>${esc(a.name)}</b><span class="sub">${esc(a.kind_label)}${a.builtin ? " · built-in" : ""}${a.history.length ? ` · used in ${a.history.length} experiment${a.history.length === 1 ? "" : "s"}` : ""}</span></span>
         ${runBadge(a)}${icon("chev-r")}</a></li>`).join("")}</ul>`);
     };
-    return `${top("Agents", "The participants in your experiments: local LLMs on your computer, or ready-made strategies. All of them run free.", `<a class="cta" href="#/agents/new">${icon("plus")}Add agent</a>`)}
+    return `${top("Agents", "The participants in your experiments: local LLMs, models with your instructions, rule-based strategies and your own programs.", `<a class="cta" href="#/agents/new">${icon("plus")}Add agent</a>`)}
       ${group("Local LLMs", "Open models running on your own computer.", ["llm"])}
-      ${group("Runs on the lab's server", "Rule-based and Python strategies, and your own programs on this machine. Results are labelled simulated or local.", ["mock", "python", "http"])}
-      ${group("Your uploaded agents", "Python files you uploaded. Each was inspected for the agent interface; none is ever executed by this server.", ["upload"])}
-      ${group("External AI providers", "Claude, GPT and Gemini configurations. They never run here: provider APIs are paid, and this project spends nothing.", ["provider"])}
+      ${group("Prompt agents", "Models with your instructions. Free with a local model; with an API key, you pay your provider.", ["model"])}
+      ${group("Strategies and programs", "Rule-based strategies, and your own programs over HTTP. Results are labelled by what ran.", ["mock", "python", "http"])}
+      ${group("Your Python files", state.catalog.local_features ? "Files you added. A file set to run asks you to confirm first, and runs in its own process. An inspected file never runs." : "Python files visitors added. Each was inspected for the agent interface; none is ever executed by this server.", ["upload"])}
+      ${group("Research study configurations", "The study's Claude, GPT and Gemini setups. They stay locked here, so the study's zero-cost rule holds. To use these models yourself, write a prompt agent.", ["provider"])}
       ${errorLine()}`;
   }
 
   function agentChooser() {
+    const local = state.catalog.local_features;
     const opt = (href, ic, title, text, tag) => `<a class="choice-card" href="${href}"><span class="cc-icon">${icon(ic)}</span><span class="cc-body"><b>${title}</b><span>${text}</span><span class="cc-tag">${tag}</span></span>${icon("chev-r")}</a>`;
     return `${top("Add an agent", "Choose how your agent is made. You can change its settings later.", "", backLink("#/agents", "Agents"))}
       <div class="choices">
         ${opt("#/agents/new/llm", "bolt", "Connect a local LLM", "Test an open model such as Llama, Qwen or Mistral, running free on your own computer with Ollama.", state.catalog.demo ? badge("", "lock", "Needs your computer") : badge("good", "ready", "Runs free"))}
-        ${opt("#/agents/new/rule", "sliders", "Configure a built-in strategy", "Pick a ready-made negotiating strategy and tune how hard it bargains. Runs instantly on the lab's server.", badge("good", "ready", "Runs free"))}
-        ${opt("#/agents/new/upload", "upload", "Upload your own Python agent", "Bring a .py file with your agent class. The lab checks it against the agent interface and registers it.", badge("", "lock", "Inspected, not executed"))}
-        ${opt("#/agents/new/provider", "cloud", "Connect an AI provider", "Set up a Claude, GPT or Gemini agent. Provider APIs are paid, so these stay locked here.", badge("warn", "lock", "Locked: zero-cost"))}
+        ${local ? opt("#/agents/new/prompt", "doc", "Write a prompt agent", "Choose a model and write its instructions. No coding. Use a free local model or your own API key.", badge("good", "ready", "No coding")) : ""}
+        ${opt("#/agents/new/rule", "sliders", "Configure a built-in strategy", "Pick a ready-made negotiating strategy and tune how hard it bargains. Runs instantly.", badge("good", "ready", "Runs free"))}
+        ${local ? opt("#/agents/new/http", "cloud", "Connect your HTTP agent", "Your own service at a URL, on this computer or elsewhere. A URL elsewhere asks you to confirm before it runs.", badge("", "info", "Your program")) : ""}
+        ${opt("#/agents/new/upload", "upload", local ? "Add a Python file" : "Inspect a Python agent", local ? "Bring a .py file with your agent class. It runs in its own process, only after you confirm." : "Bring a .py file with your agent class. The lab checks it against the agent interface. It never runs here.", local ? badge("warn", "alert", "Asks before it runs") : badge("", "lock", "Inspected, not executed"))}
       </div>
-      <p class="note" style="margin-top:18px">Already running an agent as a program on the lab's server? Choose <a href="#/agents/new/rule?kind=http_local">a local HTTP agent</a> under built-in strategies.</p>`;
+      ${local ? "" : `<div style="margin-top:18px">${notice("info", "lock", `<b>Prompt agents, your API keys, HTTP agents and running Python files work on your own computer.</b> This public demo has none of them. <a href="#/run-locally">Download and run it yourself</a>; it's free.`)}</div>`}`;
   }
 
   // Sliders for 0–1 shares; numbers for everything else.
   function paramField(p, value, ro) {
     const v = value ?? p.default, dis = ro ? " disabled" : "";
+    if (p.name === "connection") return `<label class="field"><span>${esc(p.label)}</span><select data-param="connection" data-field="params.connection"${dis}>${(state.conns ?? []).map((c) => `<option value="${esc(c.id)}"${c.id === v ? " selected" : ""}>${esc(c.name)}${c.needs_key ? (c.key ? " (key added)" : " (needs a key)") : " (free, local)"}</option>`).join("")}</select><small class="note">${esc(p.help)} <a href="#/models">Manage connections</a></small></label>`;
+    if (p.name === "model" && state.agentDraft?.kind === "prompt") return `<label class="field"><span>${esc(p.label)}</span><input type="text" list="model-options" spellcheck="false" value="${esc(v)}" data-param="model" data-field="params.model"${dis}><datalist id="model-options">${(state.modelList ?? []).map((m) => `<option value="${esc(m)}">`).join("")}</datalist><small class="note">${esc(p.help)}</small></label>`;
+    if (p.type === "text" && p.max_len > 200) return `<label class="field wide"><span>${esc(p.label)}</span><textarea rows="5" maxlength="${p.max_len}" data-param="${p.name}" data-field="params.${p.name}"${dis} placeholder="e.g. You are patient and want a deal both sides can live with.">${esc(v)}</textarea><small class="note">${esc(p.help)}</small></label>`;
     if (p.type === "choice") return `<label class="field"><span>${esc(p.label)}</span><select data-param="${p.name}" data-field="params.${p.name}"${dis}>${p.choices.map((c) => `<option${c === v ? " selected" : ""}>${esc(c)}</option>`).join("")}</select><small class="note">${esc(p.help)}</small></label>`;
     if (p.type === "number" && p.max <= 1) return `<label class="field slider"><span>${esc(p.label)} <output data-out="${p.name}">${Math.round(v * 100)}%</output></span>
       <input type="range" min="${p.min}" max="${p.max}" step="0.01" value="${v}" data-param="${p.name}" data-field="params.${p.name}"${dis}><small class="note">${esc(p.help)}</small></label>`;
-    return `<label class="field"><span>${esc(p.label)}</span><input type="${p.type === "number" ? "number" : "text"}" ${p.type === "number" ? `step="1" min="${p.min}" max="${p.max}"` : 'spellcheck="false"'} value="${esc(v)}" data-param="${p.name}" data-field="params.${p.name}"${dis}><small class="note">${esc(p.help)}</small></label>`;
+    return `<label class="field"><span>${esc(p.label)}</span><input type="${p.type === "number" ? "number" : "text"}" ${p.type === "number" ? `step="${p.optional ? "any" : "1"}" min="${p.min}" max="${p.max}"` : 'spellcheck="false"'} value="${esc(v ?? "")}" data-param="${p.name}" data-field="params.${p.name}"${dis}><small class="note">${esc(p.help)}</small></label>`;
   }
 
   function agentNew(path) {
     const [mode, query = ""] = path.split("?");
     if (mode === "upload") return uploadPage();
-    const provider = mode === "provider";
-    const kinds = state.catalog.kinds.filter((k) => (provider ? k.category === "provider" : k.executable && k.category !== "llm"));
+    state.modelList = mode === "prompt" ? state.modelList : [];
+    const provider = mode === "provider", prompt = mode === "prompt", httpMode = mode === "http";
+    const kinds = state.catalog.kinds.filter((k) => (provider ? k.category === "provider" : prompt ? k.id === "prompt" && k.executable
+      : httpMode ? k.category === "http" && k.executable : k.executable && ["mock", "python", "http"].includes(k.category)));
+    if (!kinds.length) return `${top("Add an agent", "", "", backLink("#/agents/new", "Add an agent"))}${notice("info", "lock", `<b>This works on your own computer.</b> This public demo runs rule-based agents only. <a href="#/run-locally">Download and run it yourself</a>.`)}`;
     const want = new URLSearchParams(query).get("kind");
     if (!state.agentDraft || state.agentDraft.for !== mode) state.agentDraft = { for: mode, name: "", notes: "", params: {}, kind: kinds.find((k) => k.id === want)?.id ?? kinds[0].id };
     const d = state.agentDraft, kind = kindOf(d.kind);
-    const kindPick = `<fieldset class="choice cards3"><legend>${provider ? "Provider" : "Strategy"}</legend>${kinds.map((k) => `<label class="opt"><input type="radio" name="kind" value="${k.id}"${k.id === d.kind ? " checked" : ""}>
-      <span><b>${esc(provider ? `${PROVIDERS[k.id]} · ${k.label.split(" (")[0]}` : k.label)}</b><small>${esc(CAT[k.category].runs)}</small></span></label>`).join("")}</fieldset>`;
+    const kindPick = prompt ? "" : `<fieldset class="choice cards3"><legend>${provider ? "Provider" : httpMode ? "Where it runs" : "Strategy"}</legend>${kinds.map((k) => `<label class="opt"><input type="radio" name="kind" value="${k.id}"${k.id === d.kind ? " checked" : ""}>
+      <span><b>${esc(provider ? `${PROVIDERS[k.id]} · ${k.label.split(" (")[0]}` : k.label)}</b><small>${esc(runsOf(k.id, k.category))}</small></span></label>`).join("")}</fieldset>`;
     const honesty = provider ? `${notice("warn", "lock", `<b>This agent will be saved but cannot run.</b> ${esc(kind.reason)}`)}
       <details class="more"><summary>Why can't I sign in with my ChatGPT, Claude or Gemini account?</summary><ul class="plainlist">
         <li>A consumer subscription (ChatGPT Plus, Claude Pro, Gemini Advanced) does not include API access. Each provider bills API use separately, per request.</li>
         <li>API keys are never typed into this page. The server reads them from its own <code>.env</code> file, and they stay unused while zero-cost mode is on.</li>
         <li>${kind.id === "gemini" ? "There is no Gemini adapter in this project yet; saving records a configuration only." : "The adapter exists (it is how the research study is configured), but the server refuses every paid call before anything is sent."}</li></ul></details>` : "";
     const test = provider ? `<div class="testline"><button type="button" class="btn" data-test>${icon("bolt")}Test connection</button><span id="test-out" role="status">${state.test ? esc(state.test) : ""}</span></div>` : "";
-    return `${top(provider ? "Connect an AI provider" : "Configure a built-in strategy", provider ? "Choose a provider and model, and describe the agent's role. Nothing is sent to any provider." : "Choose a strategy, name it, and set how it bargains. Everything runs on the lab's server at no cost.", "", backLink("#/agents/new", "Add an agent"))}
+    const promptTest = prompt ? `<div class="testline"><button type="button" class="btn" data-find>${icon("list")}Find models</button><button type="button" class="btn" data-ptest>${icon("bolt")}Test connection</button><span id="test-out" role="status">${esc(state.test ?? "")}</span></div><small class="note">Nothing is sent until you click. With an API key, a test is one tiny request to your provider.</small>` : "";
+    const [title, sub] = provider ? ["Research study configuration", "The study's provider setups. Nothing is sent to any provider. To use a model yourself, write a prompt agent instead."]
+      : prompt ? ["Write a prompt agent", "Choose a model and write its instructions. It gets the rules, its own values and the transcript, and never sees the other agent's values."]
+      : httpMode ? ["Connect your HTTP agent", "Your own service, answering each turn over HTTP (see <code>lab/example_http_agent.py</code>)."]
+      : ["Configure a built-in strategy", "Choose a strategy, name it, and set how it bargains."];
+    return `${top(title, sub, "", backLink("#/agents/new", "Add an agent"))}
       <form class="sheet" id="agent-form" novalidate>
         ${kindPick}
         <p class="note">${esc(kind.summary)}</p>
         ${honesty}
         <label class="field"><span>Name</span><input type="text" maxlength="60" value="${esc(d.name)}" data-k="name" data-field="name" placeholder="${esc(provider ? `${kind.label.split(" (")[0]} negotiator` : "e.g. Patient trader")}" required></label>
+        ${kind.id === "http_remote" ? notice("warn", "alert", "Each turn sends this agent's view (the pool, its own values, the transcript) to that server. You'll be asked to confirm before an experiment runs.") : ""}
         <div class="wb-params">${kind.params.map((p) => paramField(p, d.params[p.name], false)).join("")}</div>
         <label class="field"><span>Role and notes <span class="sub">(optional)</span></span><textarea rows="3" maxlength="500" data-k="notes" data-field="notes" placeholder="What this agent stands for in your experiment">${esc(d.notes)}</textarea>
-          <small class="note">${kind.reads_instructions ? "In an experiment this agent receives the frozen instructions of the chosen condition; custom prompts are never sent. Notes are for you." : "This agent does not read instructions; notes are for you."}</small></label>
-        ${test}${errorLine()}
+          <small class="note">${prompt ? "Notes are for you; they are never sent to the model." : kind.reads_instructions ? "In an experiment this agent receives the frozen instructions of the chosen condition. Notes are for you." : "This agent does not read instructions; notes are for you."}</small></label>
+        ${test}${promptTest}${errorLine()}
         <div class="actions"><button type="submit" class="cta">${icon("check")}Save agent</button><a class="btn" href="#/agents">Cancel</a></div>
       </form>`;
   }
@@ -181,11 +205,12 @@ export function createWorkbench({ main, h, render, onCleanup, motion }) {
           <div class="wb-grid2"><label class="field"><span>Agent name</span><input type="text" maxlength="60" data-u="name" data-field="name" value="${esc(u.name)}" required></label>
           <label class="field"><span>Agent class</span><select data-u="class_name" data-field="params.class_name">${r.compatible_classes.map((c) => `<option${c === u.class_name ? " selected" : ""}>${esc(c)}</option>`).join("")}</select></label></div>
           <label class="field"><span>Role and notes <span class="sub">(optional)</span></span><textarea rows="2" maxlength="500" data-u="notes" data-field="notes">${esc(u.notes)}</textarea></label>
-          ${notice("info", "lock", "<b>Registered, not runnable here.</b> Uploaded code is never executed by this server: it has no isolated sandbox for untrusted Python. To run this agent in experiments, serve it on the lab's server and add it as a <a href=\"#/agents/new/rule?kind=http_local\">local HTTP agent</a> (see <code>lab/example_http_agent.py</code>).")}
+          ${state.catalog.local_features ? notice("warn", "alert", "<b>This file runs on your computer, only after you confirm.</b> It runs in its own process with no API keys and a time limit per turn, but with your permissions: it could read your files. Only use files you trust.")
+            : notice("info", "lock", `<b>Inspected here, never executed.</b> This public demo has no way to run uploaded code safely. <a href="#/run-locally">Run the app on your computer</a> to run your own file.`)}
           ${errorLine()}<div class="actions"><button type="submit" class="cta">${icon("check")}Save agent</button><button type="button" class="btn" data-clear>Choose another file</button></div></form>`
           : `${errorLine()}<div class="actions"><button type="button" class="btn" data-clear>Choose another file</button></div>`}
       </section>`;
-    return `${top("Upload your own Python agent", "Bring a .py file containing your agent class. The lab reads the file to check it against the agent interface. It never runs it.", "", backLink("#/agents/new", "Add an agent"))}
+    return `${top(state.catalog.local_features ? "Add a Python file" : "Inspect a Python agent", state.catalog.local_features ? "Bring a .py file containing your agent class. The lab first reads the file to check it against the agent interface, without running it." : "Bring a .py file containing your agent class. The lab reads the file to check it against the agent interface. It never runs it.", "", backLink("#/agents/new", "Add an agent"))}
       ${state.catalog.demo ? notice("warn", "alert", "<b>Public demo.</b> A saved agent, including its source code, is visible to every visitor and erased when the server restarts. Checking a file without saving stores nothing.") : ""}
       ${r ? "" : `<label class="dropzone" id="dropzone"><input type="file" accept=".py,text/x-python" data-file class="vh">${icon("upload")}<b>Choose a Python file</b><span>or drop it here · up to ${Math.round(lim / 1000)} KB</span></label>${errorLine()}`}
       ${report}
@@ -200,7 +225,7 @@ export function createWorkbench({ main, h, render, onCleanup, motion }) {
   async function agentDetail(id) {
     let a;
     try { a = await getJSON(`/api/workbench/agents/${encodeURIComponent(id)}`); } catch { return `${top("Agent not found", "No agent has this id.", "", backLink("#/agents", "Agents"))}`; }
-    const kind = kindOf(a.kind), editable = !a.builtin && kind.executable && !state.catalog.demo; // the public demo never edits saved entries
+    const kind = kindOf(a.kind), editable = !a.builtin && kind.executable && !state.catalog.demo && a.kind !== "python_file"; // the public demo never edits saved entries; a file is replaced, not edited
     if (editable && (!state.agentDraft || state.agentDraft.for !== id)) state.agentDraft = { for: id, name: a.name, kind: a.kind, notes: a.notes, params: { ...a.params } };
     const d = editable ? state.agentDraft : a;
     const actions = `<button type="button" class="btn" data-dup="${a.id}">${icon("copy")}Duplicate</button>${a.builtin || state.catalog.demo ? "" : `<button type="button" class="btn" data-del="${a.id}">${icon("trash")}Delete</button>`}`;
@@ -216,12 +241,12 @@ export function createWorkbench({ main, h, render, onCleanup, motion }) {
           <dt>Inspection</dt><dd>${up.status === "compatible" ? badge("good", "check", "Compatible") : badge("warn", "alert", "Needs changes")} ${up.issues.length ? `<span class="sub">${up.issues.length} note${up.issues.length === 1 ? "" : "s"}</span>` : ""}</dd></dl>
           ${up.issues.length ? `<ul class="issues">${up.issues.map((i) => `<li class="${i.level}">${icon(i.level === "error" ? "x" : i.level === "warning" ? "alert" : "info")}<span>${esc(i.text)}${i.line ? ` <span class="sub">line ${i.line}</span>` : ""}</span></li>`).join("")}</ul>` : ""}
           <details class="more"><summary>View source</summary><pre class="prompt">${esc(up.source)}</pre></details>` : ""}${errorLine()}</div>`;
-    return `${top(a.name, `${esc(a.kind_label)} · ${esc(CAT[a.category].runs)}`, actions, backLink("#/agents", "Agents"))}
+    return `${top(a.name, `${esc(a.kind_label)} · ${esc(runsOf(a.kind, a.category))}`, actions, backLink("#/agents", "Agents"))}
       <div class="wb-split">${body}
         <aside class="sheet wb-aside"><h2 class="wb-h3">Capabilities</h2><dl class="kvs">
           <dt>Kind</dt><dd>${esc(CAT[kind.category].label)}</dd><dt>Status</dt><dd>${runBadge({ ...a, category: kind.category })}</dd><dt>Moves</dt><dd>Offer · Accept · Walk away</dd>
-          <dt>Repeatable</dt><dd>${kind.deterministic ? "Yes: same situation, same move" : "Not guaranteed"}</dd><dt>Reads instructions</dt><dd>${kind.reads_instructions ? "Yes, the condition's frozen ones" : "No"}</dd>
-          <dt>Cost</dt><dd>${kind.cost === "free" ? "Free" : "Paid provider, never called"}</dd></dl>
+          <dt>Repeatable</dt><dd>${kind.deterministic ? "Yes: same situation, same move" : "Not guaranteed"}</dd><dt>Reads instructions</dt><dd>${a.kind === "prompt" ? "Yes: the condition's and yours" : kind.reads_instructions ? "Yes, the condition's frozen ones" : "No"}</dd>
+          <dt>Cost</dt><dd>${kind.cost === "free" ? "Free" : kind.cost === "paid" ? "Paid provider, never called" : esc(kind.cost)}</dd></dl>
           <h2 class="wb-h3">Experiments</h2>${a.history.length ? `<ul class="plainlist">${a.history.map((s) => `<li><a href="#/simulation/${s.id}">${esc(s.name)}</a> <span class="sub">${when(s.created)}</span></li>`).join("")}</ul>` : '<p class="note">Not used yet.</p>'}
         </aside></div>`;
   }
@@ -246,14 +271,24 @@ export function createWorkbench({ main, h, render, onCleanup, motion }) {
     form.querySelectorAll("[data-k]").forEach((el) => el.addEventListener("input", () => { d[el.dataset.k] = el.value; }));
     form.querySelectorAll("[data-param]").forEach((el) => el.addEventListener("input", () => {
       d.params[el.dataset.param] = el.type === "range" || el.type === "number" ? (el.value === "" ? null : Number(el.value)) : el.value;
-      const out = form.querySelector(`[data-out="${el.dataset.param}"]`);
-      if (out) out.textContent = `${Math.round(Number(el.value) * 100)}%`;
+      const label = form.querySelector(`[data-out="${el.dataset.param}"]`);
+      if (label) label.textContent = `${Math.round(Number(el.value) * 100)}%`;
     }));
     if (arg === "new/llm") { // the name follows the model until the user types their own
       const model = form.querySelector('[data-param="model"]'), name = form.querySelector('[data-k="name"]');
       let was = model.value;
       model.addEventListener("input", () => { if (name.value === was) name.value = d.name = model.value; was = model.value; });
     }
+    const out = (r) => { state.test = r.ok ? (r.title ? `${r.title}${r.latency_s != null ? ` in ${r.latency_s} s` : ""}.` : `${r.models?.length ?? 0} models found.`) : `${String(r.title ?? r.error ?? "That did not work").replace(/\.$/, "")}. ${r.hint ?? ""}`; form.querySelector("#test-out").textContent = state.test; };
+    form.querySelector("[data-find]")?.addEventListener("click", async () => {
+      const res = await post("/api/models/list", { connection: d.params.connection ?? "ollama" });
+      out(res.data); state.modelList = res.data.models ?? [];
+      form.querySelector("#model-options").innerHTML = state.modelList.map((m) => `<option value="${esc(m)}">`).join("");
+    });
+    form.querySelector("[data-ptest]")?.addEventListener("click", async () => {
+      if (!d.params.model?.trim()) return out({ ok: false, title: "Choose a model first", hint: "Use Find models, or type its name." });
+      out((await post("/api/models/test", { connection: d.params.connection ?? "ollama", model: d.params.model })).data);
+    });
     form.querySelector("[data-test]")?.addEventListener("click", () => {
       // No request is made: the zero-cost guard refuses provider calls server-side, so a test could only be refused.
       state.test = `Not sent. ${state.catalog.zero_cost ? "Zero-cost mode is on, so this server refuses every paid provider call before anything leaves the lab's server." : "Provider calls are not made from the Workbench."} No credentials were read or used.`;
@@ -295,7 +330,7 @@ export function createWorkbench({ main, h, render, onCleanup, motion }) {
     form.querySelectorAll("[data-u]").forEach((el) => el.addEventListener("input", () => { u[el.dataset.u] = el.value; }));
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
-      const res = await post("/api/workbench/agents", { name: u.name, kind: "python_upload", notes: u.notes, params: { class_name: u.class_name }, upload: { filename: u.filename, source: u.source } });
+      const res = await post("/api/workbench/agents", { name: u.name, kind: state.catalog.local_features ? "python_file" : "python_upload", notes: u.notes, params: { class_name: u.class_name }, upload: { filename: u.filename, source: u.source } });
       if (res.ok) { state.upload = null; location.hash = `#/agents/${res.data.id}`; } else showError(res, "The agent could not be saved.");
     });
   }
@@ -470,9 +505,9 @@ export function createWorkbench({ main, h, render, onCleanup, motion }) {
 
   // ------------------------------------------------------------ experiments: list and wizard
   const newSim = () => ({ name: "", environment: "builtin-research", agents: { X: "builtin-priority", Y: "builtin-concession" },
-    conditions: ["baseline_v1", "structured_v1"], repetitions: 3, base_seed: 0, swap_seats: true, swap_first_mover: true, pace: "watch" });
-  const designSize = (d) => d.repetitions * d.conditions.length * (d.swap_seats ? 2 : 1) * (d.swap_first_mover ? 2 : 1);
-  const STEPS = [["agents", "Agents"], ["resources", "Resources"], ["review", "Review"]];
+    conditions: ["baseline_v1", "structured_v1"], repetitions: 3, base_seed: 0, swap_seats: true, swap_first_mover: true, pace: "watch",
+    extra_envs: [], events: [], personas: [], prices: {}, caps: {}, consented: [] });
+  const STEPS = [["agents", "Agents"], ["resources", "Resources"], ["preferences", "Preferences"], ["settings", "Settings"], ["review", "Review"]];
 
   async function simulations(_s, arg) {
     try { await catalog(); } catch (e) { return unavailable(e.message); }
@@ -483,7 +518,7 @@ export function createWorkbench({ main, h, render, onCleanup, motion }) {
   }
   const kindName = (k) => ({ simulated: "simulated", "local-llm": "local LLM" })[k] ?? "local agents";
   const experimentList = (list) => `<ul class="ilist">${list.map((s) => `<li><a class="irow" href="#/simulation/${s.id}"><span class="imain"><b>${esc(s.name)}</b>
-      <span class="sub">${esc(s.agents.X)} vs ${esc(s.agents.Y)} · ${esc(s.environment)} · ${kindName(s.data_kind)} · ${when(s.created)}</span></span>
+      <span class="sub">${esc(s.agents.X)} vs ${esc(s.agents.Y)} · ${esc(s.environment)}${s.sweep ? " and more" : ""} · ${esc(sourceSummary(s))} · ${when(s.created)}</span></span>
       <span class="imeta"><span class="mini-prog" role="img" aria-label="${s.done} of ${s.planned} negotiations"><i style="--w:${s.planned ? s.done / s.planned : 0}"></i></span><span class="sub">${s.done}/${s.planned}${s.agreement_rate == null ? "" : ` · ${pct(s.agreement_rate)} agreed`}</span></span>
       ${statusBadge(s.status)}${icon("chev-r")}</a></li>`).join("")}</ul>`;
 
@@ -495,7 +530,10 @@ export function createWorkbench({ main, h, render, onCleanup, motion }) {
     const a = agentList.find((x) => x.id === d.agents.X), b = agentList.find((x) => x.id === d.agents.Y);
     const deaf = a && b && ![a, b].some((x) => kindOf(x.kind).reads_instructions);
     const simulated = a && b && [a, b].every((x) => ["mock", "python"].includes(x.category));
-    const llm = [a, b].some((x) => x?.category === "llm");
+    const hasPrompt = [a, b].some((x) => x?.kind === "prompt"), llm = [a, b].some((x) => x?.category === "llm");
+    if (!hasPrompt) d.personas = [];
+    const est = step === STEPS.length - 1 && a?.executable && b?.executable ? await sbx.estimateFor(d) : null;
+    const estimate = est?.ok ? est.data : null;
     const stepper = `<ol class="stepper" aria-label="Experiment setup">${STEPS.map(([k, t], i) => `<li class="${i < step ? "done" : i === step ? "now" : ""}"><a href="#/simulations/new/${k}"${i === step ? ' aria-current="step"' : ""}><i>${i < step ? icon("check") : i + 1}</i>${t}</a></li>`).join("")}</ol>`;
     const agentPick = (slot) => `<fieldset class="choice"><legend>Agent ${slot}</legend><div class="pickgrid">${agentList.filter((x) => x.executable).map((x) => `<label class="opt"><input type="radio" name="agent-${slot}" value="${x.id}"${x.id === d.agents[slot] ? " checked" : ""}>
         <span><b>${esc(x.name)}</b><small>${esc(x.notes || x.kind_label)}</small></span></label>`).join("")}</div></fieldset>`;
@@ -504,8 +542,12 @@ export function createWorkbench({ main, h, render, onCleanup, motion }) {
       <div class="wb-grid2">${agentPick("X")}${agentPick("Y")}</div><p class="note"><a href="#/agents/new">Add your own agent</a></p>`;
     else if (step === 1) body = `<h2>What do they divide?</h2><p class="note">Each side privately spreads 100 points across the resources and never sees the other side's points.</p>
       <fieldset class="choice"><legend class="vh">Resource set</legend><div class="pickgrid wide">${envList.map((e) => `<label class="opt"><input type="radio" name="env" value="${e.id}"${e.id === d.environment ? " checked" : ""}>
-        <span><b>${esc(e.name)}</b><small>${esc(e.description || (e.source === "generated" ? `${e.categories} resources, new per seed` : Object.keys(e.resources).join(", ")))}</small></span></label>`).join("")}</div></fieldset>
-      ${env && env.source !== "generated" ? butterfly(Object.keys(env.resources).map((c) => ({ name: c, a: env.points.A[c], b: env.points.B[c] }))) : ""}`;
+        <span><b>${esc(e.name)}</b><small>${e.source === "generated" ? `${e.categories} resources, new per seed` : Object.entries(e.resources).map(([c, q]) => `${q} ${e.meta?.[c]?.unit ? `${e.meta[c].unit} of ` : ""}${c}`).join(" · ")}</small></span></label>`).join("")}</div></fieldset>
+      ${sbx.sweepEditor(d, envList)}${sbx.eventEditor(d)}`;
+    else if (step === 2) body = `<h2>What does each agent want?</h2><p class="note">Private preferences come from the resource set: each agent spreads 100 points over the resources, and never sees the other's.</p>
+      ${env?.source === "generated" ? notice("info", "info", "This resource set uses the research generator, so preferences are drawn anew for every seed. Each repetition is a different situation.")
+        : env ? `${butterfly(Object.keys(env.resources).map((c) => ({ name: c, a: env.points.A[c], b: env.points.B[c] })))}${env.builtin ? `<p class="note">A template. To change these values, duplicate it under <a href="#/environments/${env.id}">Resources</a>.</p>` : `<p class="note"><a href="#/environments/${env.id}">Edit these values</a></p>`}` : ""}
+      <p class="note">With seats swapped (next step), each agent plays both A and B, so neither is favoured by the values it was dealt.</p>`;
     else if (step === 3) body = `<h2>How should it run?</h2>
       <fieldset class="choice"><legend>Instruction conditions</legend>
         ${state.catalog.conditions.map((c) => `<label class="opt"><input type="checkbox" data-cond="${c}"${d.conditions.includes(c) ? " checked" : ""} data-field="conditions"><span><b>${COND_NAME[c]} instructions</b><small><code>${c}</code>${deaf ? " · not read by these agents" : ""}</small></span></label>`).join("")}
@@ -515,14 +557,18 @@ export function createWorkbench({ main, h, render, onCleanup, motion }) {
       <div class="wb-toggles"><label class="toggle"><input type="checkbox" data-b="swap_seats"${d.swap_seats ? " checked" : ""}> Swap seats, so each agent plays A and B</label>
         <label class="toggle"><input type="checkbox" data-b="swap_first_mover"${d.swap_first_mover ? " checked" : ""}> Swap who makes the first offer</label></div>
       <fieldset class="choice"><legend>Pace</legend><div class="seg" role="group" aria-label="Pace">${[["watch", "Watch live"], ["instant", "As fast as possible"]].map(([v, t]) => `<button type="button" data-pace="${v}" aria-pressed="${d.pace === v}">${t}</button>`).join("")}</div>
-        <small class="note">${d.pace === "watch" ? "Turns are spaced 0.35 s apart so you can follow them; the agents themselves answer instantly." : "No pacing: rule-based agents finish in well under a second."}</small></fieldset>`;
+        <small class="note">${d.pace === "watch" ? "Turns are spaced at least 0.35 s apart so you can follow them." : "No pacing: rule-based agents finish in well under a second."}</small></fieldset>
+      ${hasPrompt ? sbx.personaEditor(d) : ""}`;
     else body = `<h2>Review and launch</h2>
       <label class="field"><span>Experiment name <span class="sub">(optional)</span></span><input type="text" maxlength="80" value="${esc(d.name)}" data-s="name" data-field="name" placeholder="${esc(`${a?.name ?? "X"} vs ${b?.name ?? "Y"} · ${env?.name ?? ""}`)}"></label>
       <dl class="review"><div><dt>Agents</dt><dd>${esc(a?.name ?? "—")} vs ${esc(b?.name ?? "—")}</dd></div>
-        <div><dt>Resources</dt><dd>${esc(env?.name ?? "—")}<span class="sub">${env?.source === "generated" ? "new instance per seed" : "fixed values"} · ${env?.max_rounds ?? "—"} turns</span></dd></div>
-        <div><dt>Design</dt><dd>${d.repetitions} repetition${d.repetitions === 1 ? "" : "s"} × ${d.conditions.length} condition${d.conditions.length === 1 ? "" : "s"} × ${d.swap_seats ? 2 : 1} seating${d.swap_seats ? "s" : ""} × ${d.swap_first_mover ? 2 : 1} opener${d.swap_first_mover ? "s" : ""}<span class="sub">seeds ${d.base_seed}${d.repetitions > 1 ? `–${d.base_seed + d.repetitions - 1}` : ""} · ${d.pace === "watch" ? "watch live" : "fast"}</span></dd></div>
+        <div><dt>Resources</dt><dd>${esc(env?.name ?? "—")}${d.extra_envs.length ? ` and ${d.extra_envs.length} more` : ""}<span class="sub">${env?.source === "generated" ? "new instance per seed" : "fixed values"} · ${env?.max_rounds ?? "—"} turns${d.events.length ? ` · ${d.events.length} resource event${d.events.length === 1 ? "" : "s"}` : ""}</span></dd></div>
+        <div><dt>Design</dt><dd>${d.repetitions} repetition${d.repetitions === 1 ? "" : "s"} × ${d.conditions.length} condition${d.conditions.length === 1 ? "" : "s"} × ${d.swap_seats ? 2 : 1} seating${d.swap_seats ? "s" : ""} × ${d.swap_first_mover ? 2 : 1} opener${d.swap_first_mover ? "s" : ""}${d.extra_envs.length ? ` × ${d.extra_envs.length + 1} resource sets` : ""}${d.personas.length ? ` × ${d.personas.length} personas` : ""}<span class="sub">seeds ${d.base_seed}${d.repetitions > 1 ? `–${d.base_seed + d.repetitions - 1}` : ""} · ${d.pace === "watch" ? "watch live" : "fast"}</span></dd></div>
         <div><dt>Negotiations</dt><dd><b>${n}</b>${n > lim.negotiations ? ` ${badge("crit", "x", `over the ${lim.negotiations} limit`)}` : ""}</dd></div>
-        <div><dt>Cost and label</dt><dd>₹0 · ${simulated ? "rule-based agents, labelled simulated" : llm ? "local LLMs on your computer, labelled local LLM" : "local agents on the lab's server, labelled local agents"}</dd></div></dl>
+        <div><dt>Data source</dt><dd>${estimate ? esc(sourceSummary(estimate)) : "—"}<span class="sub">${estimate?.required.some((c) => c.id === "api_cost") ? "Uses your API key: you pay your provider" : "Free"}</span></dd></div></dl>
+      ${estimate ? sbx.consentPanel(d, estimate) : ""}
+      ${est && !est.ok ? `<p class="step-error" role="alert">${esc(est.data?.error ?? "This design cannot run.")}</p>` : ""}
+      ${d.repetitions < 10 ? notice("info", "info", `<b>Small sample.</b> With ${d.repetitions} repetition${d.repetitions === 1 ? "" : "s"}, intervals will be wide. Results below 10 repetitions are flagged as a first look.`) : ""}
       ${env?.source === "custom" && a && b && kindOf(a.kind).deterministic && kindOf(b.kind).deterministic && d.repetitions > 1 ? notice("warn", "alert", "Fixed values and repeatable agents: every repetition will replay the first one exactly. Use the research generator for varied situations.") : ""}
       ${llm ? notice("info", "await", `<b>Local models take time.</b> A turn can take up to a minute on a laptop, so ${n} negotiations may run for a while. You can lower the repetitions under Advanced settings.`) : ""}
       ${deaf && d.conditions.length > 1 ? notice("info", "info", "Neither agent reads instructions, so both conditions will give identical results. That checks the pipeline; it is not a finding.") : ""}
@@ -539,10 +585,15 @@ export function createWorkbench({ main, h, render, onCleanup, motion }) {
       </details>`;
     const blocker = step === 0 && !(a?.executable && b?.executable) ? "Choose two agents that can run." : step === 2 && !d.conditions.length ? "Choose at least one condition." : "";
     const nextBtn = step < STEPS.length - 1 ? `<a class="cta" href="#/simulations/new/${STEPS[step + 1][0]}"${blocker ? ' aria-disabled="true" data-block' : ""}>Continue${icon("chev-r")}</a>`
-      : `<button type="button" class="cta" id="launch"${n > lim.negotiations || !d.conditions.length ? " disabled" : ""}>${icon("play")}Run ${n} negotiation${n === 1 ? "" : "s"}</button>`;
+      : `<button type="button" class="cta" id="launch"${n > lim.negotiations || !d.conditions.length || !estimate || !sbx.consentReady(d, estimate) ? " disabled" : ""}>${icon("play")}${esc(estimate ? sbx.runLabel(estimate, n) : `Run ${n} negotiations`)}</button>`;
+    state.estimate = estimate;
+    const skip = step < STEPS.length - 1 && !blocker ? `<a class="linkbtn" href="#/simulations/new/review">Skip to review</a>` : "";
     return `${top("New experiment", "", "", backLink("#/simulations", "Experiments"))}${stepper}
-      <form class="sheet wizard" id="sim-form" novalidate>${body}${errorLine(blocker)}
-        <div class="stepnav">${step ? `<a class="btn" href="#/simulations/new/${STEPS[step - 1][0]}">${icon("chev-l")}Back</a>` : '<span></span>'}${nextBtn}</div></form>`;
+      <div class="wb-split"><form class="sheet wizard" id="sim-form" novalidate>${body}${errorLine(blocker)}
+        <div class="stepnav">${step ? `<a class="btn" href="#/simulations/new/${STEPS[step - 1][0]}">${icon("chev-l")}Back</a>` : '<span></span>'}<span class="stepnav-r">${skip}${nextBtn}</span></div></form>
+      <aside class="sheet wb-aside"><h2 class="wb-h3">So far</h2><dl class="kvs"><dt>Agents</dt><dd>${esc(a?.name ?? "—")} · ${esc(b?.name ?? "—")}</dd><dt>Resources</dt><dd>${esc(env?.name ?? "—")}</dd>
+        <dt>Negotiations</dt><dd>${n}</dd><dt>Cost</dt><dd>${hasPrompt ? "Shown at review" : "Free"}</dd></dl>
+        <h2 class="wb-h3">Other ways to start</h2><ul class="plainlist"><li><a href="#/try">Try a single negotiation</a> <span class="sub">one negotiation, turn by turn</span></li><li><a href="#/lab">Agent Lab</a> <span class="sub">a balanced evaluation of two agents</span></li></ul></aside></div>`;
   }
 
   function wireWizard() {
@@ -558,12 +609,14 @@ export function createWorkbench({ main, h, render, onCleanup, motion }) {
     on("[data-n]", "change", (el) => { d[el.dataset.n] = el.value === "" ? NaN : Number(el.value); render(false); });
     on("[data-b]", "change", (el) => { d[el.dataset.b] = el.checked; render(false); });
     on("[data-pace]", "click", (el) => { d.pace = el.dataset.pace; render(false); });
+    sbx.wireDesign(form, d);
+    sbx.wireConsent(form, d);
     main.querySelectorAll("[data-block]").forEach((a) => a.addEventListener("click", (e) => { e.preventDefault(); main.querySelector("#wb-error").hidden = false; }));
     form.addEventListener("submit", (e) => e.preventDefault());
     main.querySelector("#launch")?.addEventListener("click", async (e) => {
       const btn = e.currentTarget;
       btn.disabled = true; btn.innerHTML = '<span class="spin" aria-hidden="true"></span>Starting…';
-      const res = await post("/api/workbench/simulations", d);
+      const res = await post("/api/workbench/simulations", { ...simBody(d), consent: { token: state.estimate?.token, accepted: d.consented } });
       if (res.ok) { state.simTab = "live"; state.simDraft = null; location.hash = `#/simulation/${res.data.id}`; }
       else { btn.disabled = false; btn.innerHTML = `${icon("play")}Try again`; showError(res, "The experiment could not start."); }
     });
@@ -571,7 +624,7 @@ export function createWorkbench({ main, h, render, onCleanup, motion }) {
 
   /** One-click first experiment from built-ins: real local negotiations, labelled simulated. */
   async function quickStart() {
-    const res = await post("/api/workbench/simulations", { ...newSim(), name: "First experiment · Priority trader vs Steady conceder" });
+    const res = await post("/api/workbench/simulations", { ...simBody(newSim()), name: "First experiment · Priority trader vs Steady conceder" });
     if (res.ok) { state.simTab = "live"; location.hash = `#/simulation/${res.data.id}`; }
     return res;
   }
@@ -595,11 +648,13 @@ export function createWorkbench({ main, h, render, onCleanup, motion }) {
     const tabs = [["live", doc.status === "running" ? "Live" : "Summary"], ["analytics", "Analysis"], ["negotiations", `Negotiations (${doc.trials.length})`], ["export", "Export"]];
     if (!tabs.some(([k]) => k === state.simTab)) state.simTab = "live";
     const sum = summarize(doc.trials);
-    return `${top(doc.config.name, `${esc(doc.config.agents.X.name)} vs ${esc(doc.config.agents.Y.name)} · ${esc(doc.config.environment.name)} · started <time data-ago="${doc.created}">${when(doc.created)}</time>`,
-        statusBadge(doc.status), backLink("#/simulations", "Experiments"))}
+    return `${top(doc.config.name, `${esc(doc.config.agents.X.name)} vs ${esc(doc.config.agents.Y.name)} · ${esc((doc.config.environments ?? [doc.config.environment]).map((e) => e.name).join(", "))} · started <time data-ago="${doc.created}">${when(doc.created)}</time>`,
+        `${statusBadge(doc.status)}<a class="btn" href="#/report/${doc.id}">${icon("doc")}Report</a>`, backLink("#/simulations", "Experiments"))}
       <p class="datalabel ${doc.config.data_kind}">${icon("info")}<span><b>${esc(doc.config.label.split(":")[0])}.</b>${esc(doc.config.label.slice(doc.config.label.indexOf(":") + 1))}</span></p>
       ${doc.status !== "running" ? "" : `<div class="runbar"><div class="wb-progress" role="progressbar" aria-label="Negotiations finished" aria-valuemin="0" aria-valuemax="${doc.plan_size}" aria-valuenow="${doc.trials.length}"><i style="transform:scaleX(${doc.trials.length / doc.plan_size})"></i></div>
         <span class="sub" id="progress-text">${doc.trials.length} of ${doc.plan_size} negotiations · ${elapsed(doc)}${sum.n ? ` · ${pct(sum.agreement_rate)} agreed` : ""}</span></div>`}
+      ${doc.stop_reason ? notice("warn", "alert", `<b>Stopped early.</b> ${esc(doc.stop_reason)}`) : ""}
+      ${keyNumbers(doc)}
       <nav class="tabs" aria-label="Experiment views" id="simtabs">${tabs.map(([k, t]) => `<a href="#/simulation/${doc.id}" data-simtab="${k}"${state.simTab === k ? ' aria-current="page"' : ""}>${t}</a>`).join("")}</nav>
       <div id="simpanel">${simPanel(doc)}</div>`;
   }
@@ -626,9 +681,10 @@ export function createWorkbench({ main, h, render, onCleanup, motion }) {
   }
 
   function liveStats(doc) {
-    const s = summarize(doc.trials);
-    const tile = (k, v, sub = "") => `<div class="stat"><dt>${k}</dt><dd>${v}</dd>${sub ? `<span class="sub">${sub}</span>` : ""}</div>`;
-    return `<dl class="stats" id="live-stats">${tile("Finished", `${doc.trials.length}<small> / ${doc.plan_size}</small>`)}${tile("Reached a deal", s.outcomes.agreed, s.n ? pct(s.agreement_rate) : "")}${tile("Elapsed", elapsed(doc))}</dl>`;
+    const s = summarize(doc.trials), c = actionCounts(doc.trials);
+    const item = (k, v) => `<div><dt>${k}</dt><dd>${v}</dd></div>`;
+    return `<dl class="factline" id="live-stats">${item("Finished", `${doc.trials.length} of ${doc.plan_size}`)}${item("Agreed", s.outcomes.agreed)}${item("Walked away", s.outcomes.walked_away)}
+      ${item("Timed out", s.outcomes.timeout)}${item("Invalid", s.outcomes.invalid_action)}${item("Offers", `${c.offers} <span class="sub">(${c.rejected} rejected, ${c.accepted} accepted)</span>`)}${item("Elapsed", elapsed(doc))}</dl>`;
   }
 
   function livePanel(doc) {
@@ -654,12 +710,12 @@ export function createWorkbench({ main, h, render, onCleanup, motion }) {
 
   function trialsPanel(doc) {
     if (!doc.trials.length) return empty("No negotiations finished yet", "They appear here as each one ends.");
-    return `<div class="table-wrap"><table><thead><tr><th class="num">#</th><th class="num">Seed</th><th>Condition</th><th>Seat A · Seat B</th><th>Opens</th><th>Outcome</th><th class="num">Turns</th><th class="num">Value captured</th><th class="num">Worse-off share</th></tr></thead><tbody>
+    return `<div class="table-wrap"><table><thead><tr><th class="num">#</th><th class="num">Seed</th><th>Condition</th><th>Seat A · Seat B</th><th>Opens</th><th>Outcome</th><th class="num">Turns</th><th class="num">Value created (RWE)</th><th class="num">Fairness (EW)</th></tr></thead><tbody>
       ${doc.trials.map((t) => `<tr class="link" data-trial="${t.index}" id="trial-${t.index}" tabindex="0" aria-expanded="${state.openTrial === t.index}"><td class="num">${t.index + 1}</td><td class="num">${t.seed}</td><td>${COND_NAME[t.condition] ?? esc(t.condition)}</td>
         <td>${t.seats.A} · ${t.seats.B}</td><td>${t.first_mover}</td><td>${t.status === "completed" ? `<span class="tag" style="--c:${OUT_COLOR[t.outcome]}">${esc(OUTCOME_LABEL[t.outcome] ?? t.outcome)}</span>${t.invalid_reason ? ` <span class="sub">${esc(t.invalid_reason)}</span>` : ""}` : `<span class="sub">${esc(t.status)}${t.reason ? `: ${esc(t.reason)}` : ""}</span>`}</td>
         <td class="num">${t.rounds ?? "—"}</td><td class="num">${t.rwe == null ? "—" : fmt(t.rwe)}</td><td class="num">${t.ew == null ? "—" : fmt(t.ew)}</td></tr>
         ${state.openTrial === t.index ? `<tr class="wb-detail"><td colspan="9">${trialDetail(doc, t)}</td></tr>` : ""}`).join("")}</tbody></table></div>
-      <p class="note" style="margin-top:10px">Select a row to read its transcript. Value captured (RWE) and worse-off share (EW) score failed negotiations as 0.</p>`;
+      <p class="note" style="margin-top:10px">Select a row to read its transcript. Value created (RWE) and fairness (EW) score failed negotiations as 0.</p>`;
   }
 
   function trialDetail(doc, t) {
@@ -673,14 +729,18 @@ export function createWorkbench({ main, h, render, onCleanup, motion }) {
 
   // ------------------------------------------------------------ analytics (one experiment)
   const KPI = {
-    agreement_rate: ["Agreement", "Share of negotiations that ended in an accepted offer before the deadline. All negotiations count."],
-    rwe: ["Value captured", "Relative welfare efficiency: combined value of the deal ÷ the best combined value possible (W*). Failed negotiations score 0."],
-    ew: ["Worse-off share", "Egalitarian welfare: the points of the less satisfied agent ÷ 100. Failed negotiations score 0."],
+    agreement_rate: ["Deals reached (agreement rate)", "Agreement rate: the share of negotiations that ended in an accepted offer before the deadline. All negotiations count."],
+    rwe: ["Value created (RWE)", "How much of the best possible total value the two agents achieved. Relative welfare efficiency: combined value of the deal ÷ the best combined value possible (W*). Failed negotiations score 0."],
+    ew: ["Fairness (EW)", "How well the worse-off agent did. Egalitarian welfare: the points of the less satisfied agent ÷ 100. Failed negotiations score 0."],
     rounds: ["Turns", "Mean number of turns before the negotiation ended."],
     walk_rate: ["Walk-aways", "Share of negotiations ended by an agent walking away."],
     invalid_rate: ["Invalid actions", "Share ended by an action that broke the rules (impossible split, malformed answer, illegal accept)."],
   };
   const kpiTile = (k, v) => `<div class="stat"><dt>${KPI[k][0]}<button type="button" class="hint" data-tip="${esc(KPI[k][1])}" aria-label="${esc(`${KPI[k][0]}: ${KPI[k][1]}`)}">${icon("info")}</button></dt><dd>${v}</dd></div>`;
+  /** The three numbers a first-time reader needs, in plain words; the formal name is in the label and tooltip. */
+  const keyNumbers = (doc) => { const s = summarize(doc.trials);
+    return `<section class="keynums" id="keynums" aria-label="Key results${doc.status === "running" ? " so far" : ""}"><dl class="stats">${kpiTile("agreement_rate", s.n ? pct(s.agreement_rate) : "—")}${kpiTile("rwe", s.n ? fmt(s.rwe, 2) : "—")}${kpiTile("ew", s.n ? fmt(s.ew, 2) : "—")}</dl>
+      <p class="note">${s.n ? `From ${s.n} finished negotiation${s.n === 1 ? "" : "s"}${doc.status === "running" ? " so far" : ""}. Value created and fairness run from 0 to 1, and a failed negotiation counts as 0.` : "Appears once the first negotiation finishes."}</p></section>`; };
   const kpis = (s) => `<dl class="stats">${kpiTile("agreement_rate", pct(s.agreement_rate))}${kpiTile("rwe", fmt(s.rwe, 2))}${kpiTile("ew", fmt(s.ew, 2))}${kpiTile("rounds", fmt(s.rounds, 1))}${kpiTile("walk_rate", pct(s.walk_rate))}${kpiTile("invalid_rate", pct(s.invalid_rate))}</dl>`;
 
   /** Charts built from stored trials; shared with the report. */
@@ -701,8 +761,8 @@ export function createWorkbench({ main, h, render, onCleanup, motion }) {
       scatter: chartCard("Who got what", `Each dot is one negotiation: the points ${esc(names.X)} won against the points ${esc(names.Y)} won. Dots on the dashed line split value evenly; failures sit at 0, 0. ${conds.length > 1 ? `${COND_NAME[conds[1]]} is drawn as rings, so it shows where it coincides with ${COND_NAME[conds[0]]}. ` : ""}Select a dot to read it.`,
         scatter(scat, { xLabel: `${names.X} (share of its 100 points)`, yLabel: `${names.Y} (share)`, diagonal: "equal shares" }), { lg: condLegend,
           table: dataTable(["Negotiation", "Condition", names.X, names.Y], done.map((t) => [t.index + 1, COND_NAME[t.condition], fmt(t.agents.X.utility), fmt(t.agents.Y.utility)])) }),
-      box: chartCard("Value captured by condition", "Spread of value captured (RWE). The box holds the middle half of negotiations, the line is the median, whiskers reach the rest; circles are outliers.",
-        `${boxPlot(box("rwe"), { axis: "Value captured (RWE)" })}${boxPlot(box("ew"), { axis: "Worse-off share (EW)" })}`,
+      box: chartCard("Value created by condition", "Spread of value created (RWE). The box holds the middle half of negotiations, the line is the median, whiskers reach the rest; circles are outliers.",
+        `${boxPlot(box("rwe"), { axis: "Value created (RWE)" })}${boxPlot(box("ew"), { axis: "Fairness (EW)" })}`,
         { table: dataTable(["Condition", "Measure", "n", "Median", "Mean", "Q1", "Q3"], ["rwe", "ew"].flatMap((m) => box(m).map((g) => [g.label, m.toUpperCase(), g.stats?.n ?? 0, fmt(g.stats?.median), fmt(g.stats?.mean), fmt(g.stats?.q1), fmt(g.stats?.q3)]))) }),
       area: chartCard("Outcomes as the experiment ran", "Running share of each outcome after each finished negotiation. A flat band means the pattern settled early.",
         stackedArea(cumulativeOutcomes(trials), OUTCOMES.map((o) => ({ key: o, label: OUTCOME_LABEL[o], color: OUT_COLOR[o] })), { xLabel: "Negotiations finished" }),
@@ -753,15 +813,18 @@ export function createWorkbench({ main, h, render, onCleanup, motion }) {
     if (!a.n_completed) return empty("Nothing to analyse yet", "Analytics appear once at least one negotiation has an outcome. Nothing is estimated in the meantime.");
     const names = Object.fromEntries(Object.entries(doc.config.agents).map(([k, d]) => [k, d.name]));
     const trials = doc.trials.filter((t) => (f.condition === "all" || t.condition === f.condition) && (f.outcome === "all" || t.outcome === f.outcome));
-    const views = [["outcomes", "Outcomes"], ["agents", "Agents"], ["behaviour", "Behaviour"], ["statistics", "Statistics"], ["observations", "Findings"]];
+    const views = [...sbx.analysisViews(a.sandbox), ["outcomes", "Outcomes"], ["agents", "Agents"], ["behaviour", "Claims"], ["statistics", "Statistics"], ["observations", "Observations"]];
+    if (!views.some(([k]) => k === f.view)) f.view = "profile";
     const chip = (k, label, on) => `<button type="button" class="chip-f" data-af="${k}" aria-pressed="${on}">${label}</button>`;
     const filters = `<div class="filterbar" role="group" aria-label="Filter negotiations">${chip("condition:all", "All conditions", f.condition === "all")}${doc.config.conditions.map((c) => chip(`condition:${c}`, COND_NAME[c], f.condition === c)).join("")}
       ${f.outcome !== "all" ? `<button type="button" class="chip-f on" data-af="outcome:all" aria-pressed="true">${esc(OUTCOME_LABEL[f.outcome])} only ${icon("x")}</button>` : ""}<span class="sub">${completedTrials(trials).length} of ${a.n_completed} negotiations</span></div>`;
     let body = "";
-    if (f.view === "outcomes") {
+    if (["profile", "compare", "reaction"].includes(f.view)) body = sbx.analysisBody(f.view, doc, names);
+    else if (f.view === "outcomes") {
       const c = outcomeCharts(doc, trials, names);
       body = `${filters}${kpis(summarize(trials))}<p class="note">Descriptive: these summarise what happened in this experiment and test nothing.</p>
-        <div class="cgrid">${c.donut}${c.rounds}${c.scatter}${c.box}${c.area}${c.sankey}${c.timeline}</div>`;
+        <div class="cgrid">${c.donut}${c.box}${c.scatter}${c.rounds}</div>
+        <details class="more morecharts"><summary>More charts (3)</summary><div class="cgrid">${c.area}${c.sankey}${c.timeline}</div></details>`;
     } else if (f.view === "agents") {
       const c = agentCharts(a, names);
       body = `${notice("info", "info", "Agent measures use every negotiation in this experiment; the condition filter does not apply here. Rule-based agents follow fixed rules: differences come from the situations they met, not from learning.")}
@@ -780,8 +843,8 @@ export function createWorkbench({ main, h, render, onCleanup, motion }) {
   }
   const obsEvidence = (o) => (o.evidence.length ? `<details class="more"><summary>Evidence: ${o.n > o.evidence.length ? `first ${o.evidence.length} of ${o.n}` : `${o.evidence.length}`} negotiation${o.evidence.length === 1 ? "" : "s"}</summary><p>${o.evidence.map((e) => `<button type="button" class="btn-link" data-goto="${e.trial}">#${e.trial + 1}${e.turn ? `, turn ${e.turn}` : ""}</button>`).join(" ")}</p></details>` : `<span class="sub">n=${o.n}</span>`);
 
-  const condTable = (a) => `<div class="block-head"><h2>By condition</h2><span class="note">Value captured and worse-off share count failures as 0; deal quality, evenness and envy-free use agreed negotiations only.</span></div>
-    <div class="table-wrap"><table><thead><tr><th>Condition</th><th class="num">n</th><th class="num">Agreement</th><th class="num">Value captured</th><th class="num">Worse-off share</th><th class="num">Deal quality</th><th class="num">Evenness</th><th class="num">Envy-free</th><th class="num">Invalid</th><th class="num">Turns</th></tr></thead><tbody>
+  const condTable = (a) => `<div class="block-head"><h2>By condition</h2><span class="note">Value created and fairness count failures as 0; deal quality, evenness and envy-free use agreed negotiations only.</span></div>
+    <div class="table-wrap"><table><thead><tr><th>Condition</th><th class="num">n</th><th class="num">Deals reached</th><th class="num">Value created (RWE)</th><th class="num">Fairness (EW)</th><th class="num">Deal quality</th><th class="num">Evenness</th><th class="num">Envy-free</th><th class="num">Invalid</th><th class="num">Turns</th></tr></thead><tbody>
     ${Object.entries(a.by_condition).map(([c, v]) => `<tr><td>${COND_NAME[c] ?? esc(c)}</td><td class="num">${v.n}</td><td class="num">${pct(v.agreement_rate)}</td><td class="num">${fmt(v.rwe)}</td><td class="num">${fmt(v.ew)}</td>
       <td class="num">${fmt(v.swe)} <span class="sub">n=${v.n_agreed}</span></td><td class="num">${fmt(v.equitability)}</td><td class="num">${pct(v.envy_free_rate)}</td><td class="num">${pct(v.invalid_rate)}</td><td class="num">${fmt(v.mean_rounds, 1)}</td></tr>`).join("")}</tbody></table></div>`;
 
@@ -811,7 +874,7 @@ export function createWorkbench({ main, h, render, onCleanup, motion }) {
           ${Object.entries(sc.bins).map(([bin, v]) => `<tr><td>${bin}</td><td class="num">${v.quantity_range ? `${v.quantity_range[0]}–${v.quantity_range[1]}` : "—"}</td><td class="num">${v.n}</td><td class="num">${pct(v.opening_claim_mean)}</td></tr>`).join("")}
           </tbody></table></div><p class="note">Spearman (quantity, ask): ${sc.spearman_quantity_vs_claim == null ? "undefined (no variation)" : fmt(sc.spearman_quantity_vs_claim, 2)}, n = ${sc.n}.</p>` : `<p class="note">${esc(sc.reason)}</p>`}
         <h4 class="wb-h4">Position <span class="sub">observed; points won as a share of 100, failures 0</span></h4>
-        <div class="table-wrap"><table><thead><tr><th>Role</th><th class="num">n</th><th class="num">Agreement</th><th class="num">Points won</th></tr></thead><tbody>${roleRows}</tbody></table></div>
+        <div class="table-wrap"><table><thead><tr><th>Role</th><th class="num">n</th><th class="num">Deals reached</th><th class="num">Points won</th></tr></thead><tbody>${roleRows}</tbody></table></div>
         <h4 class="wb-h4">By condition <span class="sub">observed</span></h4>
         <div class="table-wrap"><table><thead><tr><th>Condition</th><th class="num">n</th><th class="num">Opening demand</th><th class="num">Concession</th><th class="num">Points won</th></tr></thead><tbody>${condRows}</tbody></table></div></div>`;
     };
@@ -884,6 +947,7 @@ export function createWorkbench({ main, h, render, onCleanup, motion }) {
       if (tab) tab.textContent = `Negotiations (${doc.trials.length})`;
       const s = summarize(doc.trials);
       main.querySelector("#progress-text").textContent = `${doc.trials.length} of ${doc.plan_size} negotiations · ${elapsed(doc)}${s.n ? ` · ${pct(s.agreement_rate)} agreed` : ""}`;
+      const keynums = main.querySelector("#keynums"); if (keynums) keynums.outerHTML = keyNumbers(doc);
       if (doc.status !== "running") { clearInterval(timer); h.field.refresh(); render(false).then(() => fade([...main.querySelectorAll(".answer > *, .nextsteps")])); return; }
       if (state.simTab !== "live") { if (doc.trials.length !== prev.trials.length && !["export", "analytics"].includes(state.simTab)) paint(); return; }
       const list = main.querySelector("#live-turns");
@@ -904,13 +968,13 @@ export function createWorkbench({ main, h, render, onCleanup, motion }) {
     if (name === "environments") wireEnvironments(arg);
     if (name === "simulations" && arg?.startsWith("new")) wireWizard();
     if (name === "simulation") wireSimulation(arg);
+    sbx.wire(name);
   }
 
   return {
-    routes: { agents, environments, simulations, simulation },
-    nav: { simulation: "simulations" },
-    names: ["agents", "environments", "simulations", "simulation"],
+    routes: { agents, environments, simulations, simulation, ...sbx.routes },
+    names: ["agents", "environments", "simulations", "simulation", ...sbx.names],
     wire,
-    shared: { getJSON, post, badge, statusBadge, top, backLink, section, empty, chartCard, kpis, outcomeCharts, agentCharts, condTable, experimentList, kindName, download, catalog, quickStart, runBadge, CAT, when },
+    shared: { getJSON, post, badge, statusBadge, top, backLink, section, empty, chartCard, kpis, outcomeCharts, agentCharts, condTable, experimentList, kindName, download, catalog, quickStart, runBadge, CAT, when, sbx },
   };
 }

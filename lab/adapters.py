@@ -127,7 +127,9 @@ def observation(view: AgentView, variant: str) -> dict:
     can_accept = standing is not None and standing.actor != view.role
     # Informational: the engine still enforces every rule whatever the endpoint answers.
     allowed = ([] if final else ["OFFER"]) + (["ACCEPT"] if can_accept else []) + ["WALK_AWAY"]
+    notices = {"notices": list(view.notices)} if getattr(view, "notices", ()) else {}  # sandbox_v1 resource events
     return {
+        **notices,
         "contract": CONTRACT,
         "role": view.role,
         "resource_pool": dict(view.resource_pool),
@@ -168,10 +170,11 @@ class HTTPAgent(Agent):
     for this evaluation; it is sent as a bearer header and nowhere else."""
 
     def __init__(self, url: str, label: str, instructions_variant: str,
-                 token: Optional[str] = None, timeout_s: float = DEFAULT_TIMEOUT_S):
+                 token: Optional[str] = None, timeout_s: float = DEFAULT_TIMEOUT_S, allow_remote: bool = False):
         self.name = f"http:{label}"
         self.url, self.instructions_variant, self.timeout_s = url, instructions_variant, timeout_s
         self._token = token
+        self.allow_remote = allow_remote  # only the sandbox's consented http_remote kind sets this
 
     def __repr__(self):  # never show the token, even in a traceback
         return f"HTTPAgent({self.name!r}, {self.url!r})"
@@ -189,7 +192,8 @@ class HTTPAgent(Agent):
         there the caller's wait_for ends the turn, but this thread may run on. Redirects are never followed
         (http.client does not follow them); any non-2xx is a TransportError."""
         u = urlparse(self.url)
-        require_loopback(u.hostname, "an HTTP agent request")  # raised before any connection exists
+        if not self.allow_remote:
+            require_loopback(u.hostname, "an HTTP agent request")  # raised before any connection exists
         headers = {"Content-Type": "application/json", "Accept": "application/json",
                    "User-Agent": "negotiation-lab/1"}
         if self._token:

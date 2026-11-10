@@ -191,6 +191,8 @@ def exploratory_inference(doc: dict, done: list[dict]) -> dict:
     from src.evaluation import inference as I
     if set(doc["config"]["conditions"]) != {I.BASELINE, I.STRUCTURED}:
         return {"available": False, "reason": "Needs both conditions, baseline_v1 and structured_v1, in the design."}
+    if len(doc["config"].get("environments") or []) > 1 or doc["config"].get("personas"):
+        return {"available": False, "reason": "A sweep mixes several resource sets or personas in each condition. See the comparison between groups instead."}
     fixed = doc["config"]["environment"]["source"] != "generated"
     rows = [{"seed": "fixed" if fixed else t["seed"], "condition": t["condition"], "outcome": t["outcome"],
              "rwe": t["rwe"], "ew": t["ew"]} for t in done]
@@ -280,7 +282,9 @@ def analyse(doc: dict) -> dict:
     names = {k: d["name"] for k, d in agents.items()}
     reads = {k: KINDS[d["kind"]].reads_instructions for k, d in agents.items()}
     deterministic = all(KINDS[d["kind"]].deterministic for d in agents.values())
+    from sandbox.analysis import analyse as sandbox_analyse
     return {
+        "sandbox": sandbox_analyse(doc, done, deterministic),
         "label": doc["config"]["label"], "n_completed": len(done), "not_outcomes": dict(skipped),
         "overall": _rates(done) if done else None, "by_condition": by_condition,
         "by_first_mover": {s: _rates([t for t in done if t["first_mover"] == s]) for s in "AB"},
