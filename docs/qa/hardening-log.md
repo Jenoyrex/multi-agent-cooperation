@@ -12,6 +12,10 @@ Baseline on main `b750239` (2026-11-11): 757 pytest + 24 node = **781 passing** 
 | H-03 | CLI / Windows | Start the app twice with the same `--port`: the second says "running" too, and both share the port (Windows `SO_REUSEADDR`) | Medium | Fixed | `test_h03_a_taken_port_cannot_be_shared`, `test_h03_an_explicit_taken_port_is_a_plain_message` |
 | H-04 | Wizard | Two valid 60-character agent names, no experiment name: "Keep the name under 80 characters" for a name you never typed | Medium | Fixed | `test_h04_automatic_name_is_shortened_not_refused` |
 | H-06 | Resources | Text import `resources: food=3, food=4, water=2` silently kept `food=4` | Low | Fixed | `test_h06_a_resource_listed_twice_is_an_error_not_a_silent_overwrite` |
+| H-07 | Live view | Fresh-user test: during a run the header said "Started 1 s ago" while the progress line said 30 s | Low | Fixed (refresh every 5 s instead of 30 s) | Browser check (fresh-user test) |
+| H-08 | Model errors | Test connection with an unknown model: the hint said "(Refresh models)", but the button is "Find models" | Low | Fixed | `test_h08_error_hints_name_buttons_that_exist` |
+| H-09 | Agents | Fresh-user test: after saving an AI-model agent, its page had no way to use it; you had to find New experiment and pick it | Low | Fixed ("Use in an experiment" opens the wizard with it as Agent 1) | Browser check: the wizard opened with the saved agent selected |
+| H-10 | Wizard / a11y | Fresh-user test: with a key, Run stays disabled until consent, but nothing near the button said why (and screen readers got no reason) | Low | Fixed (a note tied to the button by `aria-describedby`) | Browser check: note shown while disabled, gone after ticking |
 | H-05 | Exports / Python 3.10 | A text cell holding `\r` was not quoted on Python 3.10, so it could split a CSV row (found by the CI matrix) | Medium | Fixed | `test_h05_a_line_break_inside_a_cell_stays_inside_the_cell`, `test_csv_neutralising_leaves_empty_strings_alone` |
 
 ## Checked and fine (no bug)
@@ -35,6 +39,27 @@ Baseline on main `b750239` (2026-11-11): 757 pytest + 24 node = **781 passing** 
 | Python agent | `COOPERATION_LAB_KEY_*` and `*_API_KEY` in the environment | Not passed to the child (new test) |
 | Frozen code | `src/experiments/simulation.py` has its own CSV writer with `\n` | Only numbers and fixed labels, never user text: not affected |
 
+## Real local model (free): Ollama `llama3.2` (3.2B, Q4_K_M), labelled "Local model: llama3.2:3b"
+
+Exploratory, on this computer only, never study results. Prompt agent vs the rule-based Priority trader, `baseline_v1`.
+
+| Design | Negotiations | Outcomes | Invalid actions | Avg turns | Calls | Tokens |
+|---|---|---|---|---|---|---|
+| 3 repetitions | 3 | 3 agreed | 0 (0%) | 2.7 | 5 | 3,117 |
+| Resource event (turn 2, +6 bonus) | 2 | 2 agreed | 0 (0%) | 3.0 | 4 | 2,589 |
+| Sweep (shared lab + field hospital) | 4 | 4 agreed | 0 (0%) | 2.8 | 6 | 3,824 |
+| Fresh-user run (wizard, 1 repetition, seats and opener swapped) | 8 | 8 agreed | 0 (0%) | — | — | — |
+
+The model never broke the reply format, so the request was not changed (no before/after to show). Small samples: a first look.
+
+## Fresh-user test
+
+New venv, `pip install git+https://github.com/Jenoyrex/multi-agent-cooperation@fix/hardening`, empty data folder, only in-app
+instructions: (a) Run a sample → live view → report; (b) Add an agent → Use an AI model → Ollama found by itself, Test
+connection, Save, run 8 negotiations; (c) Model connections → add an OpenAI-compatible provider (fake server) → wrong key
+"Your API key was rejected", right key "Connected"; no credit, unknown model, rate limit and 500 each explained; wizard with
+estimate, required cap and "Run (uses your API key, you pay)"; live tokens. Confusing points found: H-07, H-08, H-09, H-10.
+
 ## Blocked
 
-None so far.
+None.

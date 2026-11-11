@@ -250,10 +250,15 @@ export function createWorkbench({ main, h, render, onCleanup, motion }) {
           <dt>Repeatable</dt><dd>${kind.deterministic ? "Yes: same situation, same move" : "Not guaranteed"}</dd><dt>Reads instructions</dt><dd>${a.kind === "prompt" ? "Yes: the condition's and yours" : kind.reads_instructions ? "Yes, the condition's frozen ones" : "No"}</dd>
           <dt>Cost</dt><dd>${kind.cost === "free" ? "Free" : kind.cost === "paid" ? "Paid provider, never called" : esc(kind.cost)}</dd></dl>
           <h2 class="wb-h3">Experiments</h2>${a.history.length ? `<ul class="plainlist">${a.history.map((s) => `<li><a href="#/simulation/${s.id}">${esc(s.name)}</a> <span class="sub">${when(s.created)}</span></li>`).join("")}</ul>` : '<p class="note">Not used yet.</p>'}
+          <a class="cta" href="#/simulations/new" data-use-agent="${esc(a.id)}">${icon("play")}Use in an experiment</a>
         </aside></div>`;
   }
 
   function wireAgents(arg) {
+    main.querySelector("[data-use-agent]")?.addEventListener("click", (e) => { // the wizard opens with this agent as Agent 1
+      const d = (state.simDraft ??= newSim());
+      d.agents = { ...d.agents, X: e.currentTarget.dataset.useAgent };
+    });
     main.querySelectorAll("[data-dup]").forEach((b) => b.addEventListener("click", async () => {
       const a = await getJSON(`/api/workbench/agents/${b.dataset.dup}`);
       const res = await post("/api/workbench/agents", { name: `${a.name} (copy)`.slice(0, 60), kind: a.kind, params: a.params, notes: a.notes, ...(a.upload ? { upload: { filename: a.upload.filename, source: a.upload.source } } : {}) });
@@ -582,7 +587,8 @@ export function createWorkbench({ main, h, render, onCleanup, motion }) {
       </details>`;
     const blocker = step === 0 && !(a?.executable && b?.executable) ? "Choose two agents that can run." : step === 1 && !d.conditions.length ? "Choose at least one condition." : "";
     const nextBtn = step < STEPS.length - 1 ? `<a class="cta" href="#/simulations/new/${STEPS[step + 1][0]}"${blocker ? ' aria-disabled="true" data-block' : ""}>Continue${icon("chev-r")}</a>`
-      : `<button type="button" class="cta" id="launch"${n > lim.negotiations || !d.conditions.length || !estimate || !sbx.consentReady(d, estimate) ? " disabled" : ""}>${icon("play")}${esc(estimate ? sbx.runLabel(estimate, n) : `Run ${n} negotiations`)}</button>`;
+      : `<button type="button" class="cta" id="launch"${n > lim.negotiations || !d.conditions.length || !estimate || !sbx.consentReady(d, estimate) ? ' disabled aria-describedby="launch-why"' : ""}>${icon("play")}${esc(estimate ? sbx.runLabel(estimate, n) : `Run ${n} negotiations`)}</button>${
+        estimate && !sbx.consentReady(d, estimate) ? `<small class="note" id="launch-why">${esc(estimate.caps_problem ? "Fix the token cap above to enable Run." : "Tick each box under “Please confirm” above to enable Run.")}</small>` : ""}`;
     state.estimate = estimate;
     return `${top("New experiment", "", "", backLink("#/simulations", "Experiments"))}${stepper}
       <form class="sheet wizard" id="sim-form" novalidate>${body}${errorLine(blocker)}
@@ -928,7 +934,7 @@ export function createWorkbench({ main, h, render, onCleanup, motion }) {
     }
     wirePanel();
     // Keep relative times ("started 2 min ago") current while the page is open.
-    const ago = setInterval(() => main.querySelectorAll("time[data-ago]").forEach((t) => (t.textContent = timeAgo(+t.dataset.ago))), 30000);
+    const ago = setInterval(() => main.querySelectorAll("time[data-ago]").forEach((t) => (t.textContent = timeAgo(+t.dataset.ago))), 5000); // every 5 s, so "Started … ago" never trails the live elapsed time
     onCleanup(() => clearInterval(ago));
     if (state.doc.status !== "running") return;
     // Poll while it runs; the view only ever shows what the engine reported.
