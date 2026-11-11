@@ -5,6 +5,7 @@ never in the package folder.
 """
 from __future__ import annotations
 
+import sys
 import argparse
 import errno
 import os
@@ -88,7 +89,15 @@ def build_server(args: argparse.Namespace):
 
 def main(argv=None) -> None:
     args = parse_args(argv)
-    httpd, folder = build_server(args)
+    folder = data_dir()
+    try:
+        httpd, folder = build_server(args)
+    except OSError as exc:  # a plain message, not a traceback: these are the user's machine, not a bug
+        taken = exc.errno in (errno.EADDRINUSE, errno.EACCES, 10048, 10013) and args.port is not None
+        reason = (f"Port {args.port} is already in use or not allowed. Run without --port to use a free one, or choose another."
+                  if taken else f"Cannot use the data folder {folder}: {exc.strerror or exc}. Set {HOME_ENV} to a folder you can write to.")
+        print(f"Cooperation Lab could not start. {reason}", file=sys.stderr)
+        raise SystemExit(2) from None
     port = httpd.server_address[1]
     shown = "127.0.0.1" if args.host in ("0.0.0.0", "::") else args.host
     url = f"http://{shown}:{port}/"

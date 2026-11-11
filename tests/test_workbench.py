@@ -150,7 +150,7 @@ def test_http_agents_are_known_to_read_instructions():
 
 def test_csv_exports_neutralise_formula_prefixes():
     from workbench.export import _csv
-    assert _csv(["name"], [["=cmd()"], ["plain"]]) == "name\n'=cmd()\nplain\n"
+    assert _csv(["name"], [["=cmd()"], ["plain"]]) == "name\r\n'=cmd()\r\nplain\r\n"
     assert _csv(["name"], [["\tx"], ["@y"], ["-1"]]).splitlines()[1:] == ["'\tx", "'@y", "'-1"]
 
 
@@ -224,7 +224,7 @@ def test_wrong_json_types_are_a_400_not_a_crash(route, body):
 
 def test_csv_neutralising_leaves_empty_strings_alone():
     from workbench.export import _csv
-    assert _csv(["a", "b"], [["", "\r=x"]]) == 'a,b\n,"\'\r=x"\n'  # empty stays empty; a leading CR is neutralised
+    assert _csv(["a", "b"], [["", "\r=x"]]) == 'a,b\r\n,"\'\r=x"\r\n'  # empty stays empty; a leading CR is neutralised and quoted
 
 
 def test_provenance_records_the_actual_zero_cost_state(monkeypatch):

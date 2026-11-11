@@ -82,6 +82,8 @@ class FakeModels:
                 finish, content = "stop", None
                 if "Resource pool" not in user:  # the connection test's tiny request
                     content = "OK"
+                elif model == "empty":
+                    content = ""
                 elif model == "garbage":
                     content = "Sure! I would like half of everything."
                 elif model == "fenced":

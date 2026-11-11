@@ -158,6 +158,8 @@ def parse_text(text: str) -> dict:
                 k, eq, v = item.partition("=")
                 if not eq or not (v.strip().isascii() and v.strip().isdigit()):
                     raise WorkbenchError(f"Line {n}: write each entry as name=whole number, got “{item}”.", f"line {n}")
+                if k.strip() in pairs:  # silently keeping the last value would hide a typo
+                    raise WorkbenchError(f"Line {n}: “{k.strip()}” is listed twice.", f"line {n}")
                 pairs[k.strip()] = int(v)
             if key == "resources":
                 doc["resources"] = pairs
