@@ -8,6 +8,7 @@ import asyncio
 import hashlib
 import json
 import random
+import re
 import socket
 import statistics
 import threading
@@ -702,7 +703,7 @@ def test_idna_invalid_hostname_is_an_agent_failure(url, monkeypatch):  # fails i
     for t in ev["trials"]:
         assert t["status"] == "aborted" and "outcome" not in t and "per_agent" not in t
         assert t["abort"]["class"] == "agent_failure" and t["abort"]["agent"] == "Y" and t["abort"]["attributed"]
-        assert "UnicodeError" in t["abort"]["detail"]
+        assert re.search(r"Unicode\w*Error", t["abort"]["detail"])  # 3.13+ raises UnicodeEncodeError
     assert s["aborts_by_class"] == {"agent_failure": E.MAX_ABORTS, "provider_failure": 0, "budget_exhausted": 0}
     assert s["failures"]["Y"]["agent_failures"] == E.MAX_ABORTS and s["failures"]["X"]["agent_failures"] == 0
     assert s["used"] == 0 and s["outcomes"]["agreed"] is None
@@ -714,7 +715,7 @@ def test_zero_cost_mode_refuses_remote_http_agents_before_any_network_call(url):
         ev = _evaluate(SCRIPTED, {"kind": "http", "url": url, "label": "remote"})
     assert blocked == [] and ev["status"] == "stopped"
     assert all(t["status"] != "completed" for t in ev["trials"])
-    assert "ZeroCostViolation" in json.dumps(ev) or "Zero-cost mode refused" in json.dumps(ev)
+    assert any(s in json.dumps(ev) for s in ("ZeroCostViolation", "Zero-cost mode refused", "Zero-cost mode is on"))
 
 
 def test_provider_failure_is_not_attributed(monkeypatch):  # 23

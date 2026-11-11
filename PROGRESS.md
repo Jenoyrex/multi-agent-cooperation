@@ -468,3 +468,14 @@ Redesign of the whole dashboard into a guided multi-agent experimentation platfo
 - **Defects found and fixed in browser loops:** stale server on :8765 with an old CSP hash blocked the theme script (moved verification to :8770; the old process was left running); unwired legend toggles; overlapping scatter series (later series now rings); oversized text in wide charts; colliding line labels; a full-ring donut drawn as a bitten disc; new resource sets opening in an error state; fieldset grid and `max-content` summaries widening phones; legacy empty states laid out sideways; duplicated copy; a `normalize100` deficit loop (caught by its unit test).
 - **Verification:** `pytest` **617 passed** (597 + 20 new); `node --test` **20 passed** (14 + 6 new); `node --check` all static JS; `git diff --check` clean. Chrome: all 32 routes render with no JS errors; full journey run (upload compatible and rejected files, wizard, 24-negotiation live run, analytics interactions, report, exports, provider test that sends nothing). True 390 px viewport via the DevTools protocol: 30 routes and 3 experiment tabs × light and dark, no page overflow after fixes. Reduce motion: 0 animated elements.
 - **Limitations:** uploaded agents cannot run (no isolated sandbox; serve them as local HTTP agents instead); charts have no zoom; PDF is the browser's print-to-PDF; pooled analytics reads the newest 30 experiments; Inter is a stand-in for SF Pro off Apple devices (detector flags it as overused); Barlow font files remain on disk unused.
+
+---
+
+## Correction (2026-11-11)
+
+The "Remaining limitations" list under the zero-cost mandate (2026-10-28) says the preregistered §8.9 inferential
+analysis is not implemented. That is no longer true: `src/evaluation/inference.py` implements the sign-flip
+permutation test, the 95% percentile bootstrap interval, the Wilcoxon sensitivity check and the Holm correction
+(first added in commit `ed56c57`), and `scripts/run_analysis.py` runs it on a complete full run only. What is still
+true: no real-model pilot or full run exists, so H1–H3 are untested and no test result has been computed. The
+earlier entry is left as written; this note supersedes that one line.
