@@ -144,7 +144,7 @@ def classify(exc: BaseException, conn: dict) -> dict:
     if code == 429:
         return {"kind": "rate_limited", "title": "Rate limited", "hint": "Too many requests for now. Wait a minute and try again, or set a lower requests-per-minute limit."}
     if code == 404 or (code == 400 and "model" in text and any(s in text for s in ("not found", "does not exist", "not_found", "unknown model"))):
-        return {"kind": "model_not_found", "title": "Model not found", "hint": "Choose a model from the list (Refresh models), and check the base URL."}
+        return {"kind": "model_not_found", "title": "Model not found", "hint": "Click Find models and choose one from the list, and check the base URL."}
     if code is not None and code >= 500:
         return {"kind": "provider_error", "title": f"The provider had a problem ({code})", "hint": "This is on their side. Try again later."}
     return {"kind": "other", "title": f"The server answered with an error{f' ({code})' if code else ''}", "hint": "See the details below."}

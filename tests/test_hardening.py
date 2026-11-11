@@ -142,3 +142,15 @@ def test_the_network_dropping_mid_run_stops_cleanly_with_a_plain_reason(tmp_path
     finally:
         fake.server.RequestHandlerClass.do_POST = real
         fake.close()
+
+
+# H-08: the model-not-found hint named a "Refresh models" button that does not exist (it is "Find models")
+def test_h08_error_hints_name_buttons_that_exist():
+    from sandbox import providers
+
+    class NotFound(Exception):
+        status_code = 404
+    hint = providers.classify(NotFound("no such model"), providers.resolve("openai"))["hint"]
+    assert "Find models" in hint
+    ui = (ROOT / "dashboard" / "static" / "sandboxui.js").read_text(encoding="utf-8") + (ROOT / "dashboard" / "static" / "workbench.js").read_text(encoding="utf-8")
+    assert "Find models" in ui and "Refresh models" not in ui
