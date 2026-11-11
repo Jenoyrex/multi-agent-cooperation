@@ -1,9 +1,20 @@
+import http.server
+import socketserver
 from collections import deque
 
 import pytest
 
 from dashboard import data, demo
 from src import zero_cost
+
+
+def _bind_without_reverse_dns(self):
+    """The tests' own stdlib servers skip socket.getfqdn too (slow on macOS runners); dashboard.server.LabServer does it itself."""
+    socketserver.TCPServer.server_bind(self)
+    self.server_name, self.server_port = str(self.server_address[0]), self.server_address[1]
+
+
+http.server.HTTPServer.server_bind = _bind_without_reverse_dns
 
 
 @pytest.fixture(autouse=True)

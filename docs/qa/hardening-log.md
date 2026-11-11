@@ -16,6 +16,7 @@ Baseline on main `b750239` (2026-11-11): 757 pytest + 24 node = **781 passing** 
 | H-08 | Model errors | Test connection with an unknown model: the hint said "(Refresh models)", but the button is "Find models" | Low | Fixed | `test_h08_error_hints_name_buttons_that_exist` |
 | H-09 | Agents | Fresh-user test: after saving an AI-model agent, its page had no way to use it; you had to find New experiment and pick it | Low | Fixed ("Use in an experiment" opens the wizard with it as Agent 1) | Browser check: the wizard opened with the saved agent selected |
 | H-10 | Wizard / a11y | Fresh-user test: with a key, Run stays disabled until consent, but nothing near the button said why (and screen readers got no reason) | Low | Fixed (a note tied to the button by `aria-describedby`) | Browser check: note shown while disabled, gone after ticking |
+| H-11 | Server / macOS | CI matrix: every macOS job sat in the tests for 20+ minutes. `http.server` binds with a reverse DNS lookup (`socket.getfqdn`) that is slow on macOS, paid by every app start and test server | Medium (slow start on a Mac) | Fixed (bind without the lookup; tests' stdlib servers too) | `test_h11_starting_the_server_does_no_reverse_dns_lookup` + macOS CI jobs |
 | H-05 | Exports / Python 3.10 | A text cell holding `\r` was not quoted on Python 3.10, so it could split a CSV row (found by the CI matrix) | Medium | Fixed | `test_h05_a_line_break_inside_a_cell_stays_inside_the_cell`, `test_csv_neutralising_leaves_empty_strings_alone` |
 
 ## Checked and fine (no bug)
