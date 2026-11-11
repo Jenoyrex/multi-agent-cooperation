@@ -191,10 +191,10 @@ def test_connection_test_sends_one_tiny_request_only_when_clicked(fake):
     assert fake.requests[0]["body"]["max_tokens"] == 16
 
 
-@pytest.mark.parametrize("model,title", [("unauthorized", "The key was rejected"), ("limited", "Rate limited or out of credit")])
-def test_connection_test_explains_failures(fake, model, title):
+@pytest.mark.parametrize("model,kind", [("unauthorized", "invalid_key"), ("limited", "rate_limited")])
+def test_connection_test_explains_failures(fake, model, kind):
     r = providers.test_connection(connection(fake), model)
-    assert not r["ok"] and r["title"] == title
+    assert not r["ok"] and r["kind"] == kind and r["hint"]
 
 
 def test_connection_test_timeout_and_unreachable_and_not_compatible(fake, monkeypatch):
@@ -203,7 +203,7 @@ def test_connection_test_timeout_and_unreachable_and_not_compatible(fake, monkey
     conn = connection(fake)
     store.put("connections", {**store.get("connections", conn), "base_url": "http://127.0.0.1:9/v1"})
     r = providers.test_connection(conn, "good")
-    assert not r["ok"] and r["title"] == "Could not reach the server" and "running" in r["hint"]
+    assert not r["ok"] and r["kind"] == "local_not_running" and "is not running" in r["title"] and "Start" in r["hint"]
 
 
 def test_model_list_comes_from_the_server(fake):

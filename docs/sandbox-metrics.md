@@ -57,6 +57,14 @@ Calls, attempts and tokens are what the provider reported. If any completed call
 rather than partial. Tokens from discarded retries cannot be seen, so real usage may be higher. Cost uses only the prices
 you entered, and without prices it stays unknown. Your provider's bill is the real figure.
 
+**Per agent.** Each negotiation records calls and tokens per agent (`usage_by_agent`, from the per-call log), and the
+analysis sums them per agent. Rule-based, HTTP and Python agents make no model calls, so they show 0 calls. Experiments
+saved before this field existed show no per-agent table.
+
+**Live, against the cap.** While a capped run is going, the page shows the tokens the capped models have used so far
+(`spend.tokens`) against the cap, updated after every call. When the run has an API model, only API models count against
+the cap; local models are free and count only in a run without any API model.
+
 ## Checking the numbers
 
 `metrics.csv` holds every metric per negotiation and agent. Average per repetition, then across repetitions, and you get

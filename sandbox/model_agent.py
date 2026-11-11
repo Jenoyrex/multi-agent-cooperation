@@ -102,7 +102,8 @@ class PromptAgent(Agent):
         try:
             response, attempts, latency = await call_with_retries(lambda: create(**kwargs), self.gen)
         except TransportError as exc:
-            detail = keys.redact(str(exc))
+            why = providers.classify(exc.__cause__ or exc, self.conn)  # the frozen retry loop keeps the SDK error as the cause
+            detail = keys.redact(f"{why['title']}. {why['hint']} [{exc}]")
             self.last_call = CallRecord(model=self.model, error=detail, attempts=exc.attempts, latency_s=exc.latency_s)
             raise TransportError(detail, exc.attempts, exc.latency_s) from None
         except Exception as exc:  # noqa: BLE001 — e.g. an SDK decoding failure; never shown unredacted

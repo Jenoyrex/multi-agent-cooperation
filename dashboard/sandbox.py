@@ -31,6 +31,7 @@ from dotenv import load_dotenv
 
 from dashboard import data as D
 from dashboard import demo
+from src.zero_cost import ZeroCostViolation
 from src.agents.base import Agent
 from src.agents.claude_agent import ClaudeAgent
 from src.agents.generation import GenerationConfig
@@ -64,6 +65,11 @@ class SandboxError(ValueError):
 
 class BusyError(SandboxError):
     """A run is already in progress (sandbox or Agent Lab); nothing was created."""
+
+
+ZERO_COST_TITLE = "Zero-cost mode is on"
+ZERO_COST_MESSAGE = ("This tool only calls agents on this computer and never a paid provider. To use your own API key or a remote "
+                     "agent, add it under Agents and run it from Experiments, which shows the cost and asks for your consent first.")
 
 
 def info() -> dict:
@@ -263,6 +269,8 @@ def execute(run: Run) -> None:
         run.set(status="finished", thinking=None, result=summarize_result(record, run))
     except NegotiationAborted as exc:
         run.set(status="stopped", thinking=None, error=demo.scrub(explain_abort(exc.reason, exc.detail, exc.actor, cfg)))
+    except ZeroCostViolation:  # a choice, not a server error
+        run.set(status="stopped", thinking=None, error=demo.scrub({"title": ZERO_COST_TITLE, "message": ZERO_COST_MESSAGE}))
     except Exception as exc:  # noqa: BLE001 — shown as a safe message; the traceback goes to the server log
         traceback.print_exc()
         run.set(status="stopped", thinking=None, error=demo.scrub({

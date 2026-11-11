@@ -250,7 +250,24 @@ def usage(doc: dict) -> dict:
     tokens = None if total("input_tokens") is None or total("output_tokens") is None else total("input_tokens") + total("output_tokens")
     return {"calls": calls, "attempts": sum(u.get("api_attempts") or 0 for u in rows), "input_tokens": total("input_tokens"), "output_tokens": total("output_tokens"),
             "tokens": tokens, "cost": total("cost_usd"), "priced": bool(doc["config"].get("prices")),
-            "per_negotiation": [{"index": t["index"], "status": t["status"], **{k: t["usage"].get(k) for k in ("api_calls", "input_tokens", "output_tokens", "cost_usd")}} for t in doc["trials"] if t.get("usage")]}
+            "per_negotiation": [{"index": t["index"], "status": t["status"], **{k: t["usage"].get(k) for k in ("api_calls", "input_tokens", "output_tokens", "cost_usd")}} for t in doc["trials"] if t.get("usage")],
+            "per_agent": per_agent_usage(doc)}
+
+
+def per_agent_usage(doc: dict) -> dict:
+    """Calls and tokens per agent label, summed over negotiations. Older experiments without the split give {}."""
+    out: dict = {}
+    for t in doc["trials"]:
+        for label, u in (t.get("usage_by_agent") or {}).items():
+            row = out.setdefault(label, {"calls": 0, "input_tokens": 0, "output_tokens": 0, "cost": 0.0, "unknown": False})
+            row["calls"] += u.get("api_calls") or 0
+            if u.get("api_calls"):
+                for k, src in (("input_tokens", "input_tokens"), ("output_tokens", "output_tokens"), ("cost", "cost_usd")):
+                    if u.get(src) is None:
+                        row["unknown"] = row["unknown"] or k != "cost"
+                    else:
+                        row[k] += u[src]
+    return out
 
 
 # ------------------------------------------------------------ warnings and findings

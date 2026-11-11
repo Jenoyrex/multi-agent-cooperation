@@ -25,7 +25,7 @@ def play(user: str) -> dict:
 
 
 class FakeModels:
-    def __init__(self, key_required=None):
+    def __init__(self, key_required=None, port=0):
         self.requests, self.key_required, self.fail_first = [], key_required, {"flaky": 1}
         outer = self
 
@@ -58,6 +58,17 @@ class FakeModels:
                     return self._send(401, {"error": {"message": f"Incorrect API key provided: {self._auth()}"}})
                 if model == "unauthorized":
                     return self._send(401, {"error": {"message": f"Incorrect API key provided: {self._auth()}"}})
+                errors = {  # provider-shaped failures, as their docs describe them
+                    "quota": (429, {"error": {"message": "You exceeded your current quota, please check your plan and billing details.", "type": "insufficient_quota", "code": "insufficient_quota"}}),
+                    "credit": (400, {"type": "error", "error": {"type": "invalid_request_error", "message": "Your credit balance is too low to access the Anthropic API."}}),
+                    "forbidden": (403, {"error": {"message": "You do not have access to this model.", "code": "model_not_allowed"}}),
+                    "missing": (404, {"error": {"message": "The model `missing` does not exist.", "code": "model_not_found"}}),
+                    "bad-key-400": (400, {"error": {"code": 400, "message": "API key not valid. Please pass a valid API key.", "status": "INVALID_ARGUMENT"}}),
+                    "exhausted": (429, {"error": {"code": 429, "message": "Resource has been exhausted (e.g. check quota).", "status": "RESOURCE_EXHAUSTED"}}),
+                    "server-error": (500, {"error": {"message": "internal error"}}),
+                }
+                if model in errors:
+                    return self._send(*errors[model])
                 if model == "limited":
                     return self._send(429, {"error": {"message": "rate limited"}})
                 if model == "flaky" and outer.fail_first["flaky"] > 0:
@@ -87,7 +98,7 @@ class FakeModels:
                                  "choices": [{"index": 0, "finish_reason": finish, "message": {"role": "assistant", "content": content}}],
                                  "usage": {"prompt_tokens": TOKENS[0], "completion_tokens": TOKENS[1], "total_tokens": sum(TOKENS)}})
 
-        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
         self.port = self.server.server_address[1]
         self.url = f"http://127.0.0.1:{self.port}/v1"
         threading.Thread(target=self.server.serve_forever, daemon=True).start()

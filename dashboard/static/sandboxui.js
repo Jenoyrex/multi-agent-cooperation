@@ -41,14 +41,26 @@ export function createSandboxUI({ main, h, render, shared }) {
     ? `<span class="ok-line">${icon("check")} ${esc(r.title ?? `${r.models?.length ?? 0} models found`)}${r.latency_s != null ? ` in ${r.latency_s} s` : ""}${r.input_tokens != null ? `, ${r.input_tokens + r.output_tokens} tokens` : ""}</span>`
     : `<span class="bad-line">${icon("x")} ${esc(r.title.replace(/\.$/, ""))}. ${esc(r.hint ?? "")}</span>${r.detail ? `<details class="more"><summary>Details</summary><p class="note">${esc(r.detail)}</p></details>` : ""}`;
 
+  const ext = (href, text) => `<a href="${esc(href)}" target="_blank" rel="noopener noreferrer">${esc(text)}</a>`;
+  const keyHelp = (c) => !c.key_help ? "" : `<details class="more keyhelp"><summary>How to get your API key</summary><ol class="steps">
+      <li>Sign in to ${esc(c.name)}'s developer console and create a key: ${ext(c.key_help.console, "API keys page")}.</li>
+      <li><b>${esc(state.subscriptionNote ?? "A chat subscription does not include an API key.")}</b>${c.key_help.subscription ? ` ${ext(c.key_help.subscription, `${c.name}'s explanation`)}.` : ""}</li>
+      <li>You pay ${esc(c.name)} for what you use, not this app. Set up billing here: ${ext(c.key_help.billing, "billing")}.${c.key_help.free_tier ? " Google also offers a free tier with limits; check its pricing page for the current terms." : ""}</li>
+      <li>Prices change, so this app never guesses them. Check the official ${ext(c.key_help.pricing, "pricing page")} and type the prices in before a run if you want a cost estimate.</li></ol></details>`;
+  const keySource = (c) => c.key_source === "entered" ? (c.key_saved ? "saved in your .env on this computer" : "for this session only") : "from your environment or .env";
   const connCard = (c) => {
     const models = state.models[c.id] ?? [];
     const keyRow = !c.needs_key ? "" : c.key
-      ? `<div class="keyrow"><span>${icon("lock")} Key <code>${esc(c.key)}</code> <span class="sub">${c.key_source === "environment" ? "from your environment or .env" : "in memory until you close the app"}</span></span><button type="button" class="btn" data-key-del="${c.id}">Remove</button></div>`
-      : `<form class="keyrow" data-key-form="${c.id}"><label class="field grow"><span>API key</span><input type="password" autocomplete="off" spellcheck="false" data-key-input placeholder="Paste your key" data-field="key"></label><button type="submit" class="btn">Add key</button></form>`;
+      ? `<div class="keyrow"><span>${icon("lock")} Key <code>${esc(c.key)}</code> <span class="sub">${keySource(c)}</span></span><span class="btns"><button type="button" class="btn" data-key-del="${c.id}">Remove</button>${c.key_saved ? `<button type="button" class="btn" data-key-del="${c.id}" data-file="1">Delete from my .env</button>` : ""}</span></div>`
+      : `<form class="keyrow keyform" data-key-form="${c.id}"><label class="field grow"><span>API key</span><input type="password" autocomplete="off" spellcheck="false" data-key-input placeholder="Paste your key" data-field="key"></label>
+          <fieldset class="savemode"><legend>Keep the key</legend>
+            <label><input type="radio" name="save-${c.id}" value="session" checked> For this session only</label>
+            <label><input type="radio" name="save-${c.id}" value="env_file"> Save to my .env on this computer</label>
+            <small class="note">Saving writes it to <code>${esc(state.envFile ?? ".env")}</code>, in plain text, on this computer only. It is never put in git, the database, exports or logs. Anyone who can open your files can read it.</small></fieldset>
+          <button type="submit" class="btn">Add key</button></form>`;
     return `<li class="sheet conn" data-conn="${c.id}"><div class="rc-head"><div><h3>${esc(c.name)}</h3><p class="sub">${c.base_url ? `<code>${esc(c.base_url)}</code>` : "Anthropic API"}</p></div>
         ${c.tier === "local" ? badge("good", "ready", "Free, on this computer") : badge("warn", "cloud", "You pay your provider")}</div>
-      <p class="note">${esc(c.help)}</p>${keyRow}
+      <p class="note">${esc(c.help)}</p>${keyHelp(c)}${keyRow}
       <div class="testrow"><button type="button" class="btn" data-list="${c.id}">${icon("list")}Find models</button>
         <label class="field grow"><span>Model</span><input type="text" list="m-${c.id}" spellcheck="false" value="${esc(state.model[c.id] ?? "")}" data-model-input placeholder="Model name"><datalist id="m-${c.id}">${models.map((m) => `<option value="${esc(m)}">`).join("")}</datalist></label>
         <button type="button" class="btn" data-test="${c.id}">${icon("bolt")}Test connection</button></div>
@@ -62,10 +74,11 @@ export function createSandboxUI({ main, h, render, shared }) {
     if (localOnly()) return `${top("Model connections", "Connect free local models or your own API keys.")}${lockNote("Connecting models")}`;
     const data = await getJSON("/api/models/connections");
     state.connections = data.connections;
+    state.subscriptionNote = data.subscription_note; state.envFile = data.env_file;
     const local = data.connections.filter((c) => c.tier === "local"), api = data.connections.filter((c) => c.tier === "api");
     return `${top("Model connections", "Where prompt agents get their answers: a free model on this computer, or a provider with your own key.", `<a class="cta" href="#/agents/new/prompt">${icon("plus")}Write a prompt agent</a>`)}
       ${section("On this computer", "Free. Nothing leaves your computer.", `<ul class="conn-list">${local.map(connCard).join("")}</ul>`)}
-      ${section("With your own API key", "You pay your provider directly. Keys stay in memory or your .env, and are never saved or shown again.", `<ul class="conn-list">${api.map(connCard).join("")}</ul>`)}
+      ${section("With your own API key", "You pay your provider directly. Keys stay in memory or your .env, and are never saved anywhere else or shown again.", `${notice("info", "info", "<b>A chat subscription is not an API key.</b> ChatGPT Plus, Claude Pro and Gemini Advanced do not include API access. Each provider sets up and bills API use separately, in its developer console. Open “How to get your API key” on a provider below.")}<ul class="conn-list">${api.map(connCard).join("")}</ul>${api.some((c) => c.key) ? `<div class="actions"><button type="button" class="btn" id="forget-keys">${icon("trash")}Forget all keys</button><small class="note">Removes every key from this session. Keys in a .env file stay there; delete them with "Delete from my .env".</small></div>` : ""}`)}
       <section class="block"><div class="block-head"><h2>Add a connection</h2><span class="note">Any OpenAI-compatible server.</span></div>
         <form class="sheet" id="conn-form" novalidate><div class="wb-grid2"><label class="field"><span>Name</span><input type="text" maxlength="40" data-c="name" data-field="name" placeholder="e.g. Groq"></label>
           <label class="field"><span>Where it runs</span><select data-c="tier" data-field="tier"><option value="api">A provider, with a key</option><option value="local">This computer, free</option></select></label></div>
@@ -82,11 +95,17 @@ export function createSandboxUI({ main, h, render, shared }) {
     main.querySelectorAll("[data-model-input]").forEach((el) => el.addEventListener("input", () => { state.model[el.closest("[data-conn]").dataset.conn] = el.value; }));
     main.querySelectorAll("[data-key-form]").forEach((f) => f.addEventListener("submit", async (e) => {
       e.preventDefault();
-      const input = f.querySelector("[data-key-input]"), res = await post("/api/models/keys", { connection: f.dataset.keyForm, key: input.value });
+      const save = f.querySelector("input[type=radio]:checked")?.value ?? "session";
+      const input = f.querySelector("[data-key-input]"), res = await post("/api/models/keys", { connection: f.dataset.keyForm, key: input.value, save });
       input.value = ""; // the page keeps no copy
       if (res.ok) rerender(); else { state.results[f.dataset.keyForm] = { ok: false, title: res.data?.error ?? "The key was not accepted", hint: "" }; rerender(); }
     }));
-    main.querySelectorAll("[data-key-del]").forEach((b) => b.addEventListener("click", async () => { await post("/api/models/keys/delete", { connection: b.dataset.keyDel }); rerender(); }));
+    main.querySelectorAll("[data-key-del]").forEach((b) => b.addEventListener("click", async () => { await post("/api/models/keys/delete", { connection: b.dataset.keyDel, from_env_file: b.dataset.file === "1" }); rerender(); }));
+    main.querySelector("#forget-keys")?.addEventListener("click", async (e) => {
+      const b = e.currentTarget;
+      if (b.dataset.confirm !== "1") { b.dataset.confirm = "1"; b.textContent = "Confirm: forget all keys"; b.classList.add("danger"); return; }
+      await post("/api/models/keys/forget", {}); rerender();
+    });
     main.querySelectorAll("[data-conn-del]").forEach((b) => b.addEventListener("click", async () => {
       if (b.dataset.confirm !== "1") { b.dataset.confirm = "1"; b.textContent = "Confirm delete"; b.classList.add("danger"); return; }
       await post(`/api/models/connections/${b.dataset.connDel}/delete`, {}); rerender();
@@ -220,14 +239,15 @@ export function createSandboxUI({ main, h, render, shared }) {
       ${order.map((m) => `<tr><th scope="row">${metricName(m, sb.metrics[m])}</th>${labels.map((l) => cell(sb.profiles[l][m], m, sb.metrics[m].unit, COLORS[l] ?? "var(--scale)")).join("")}</tr>`).join("")}</tbody></table></div>`;
   }
 
-  function usageBlock(sb) {
+  function usageBlock(sb, names = {}) {
     const u = sb.usage;
     const models = Object.values(sb.source_labels ?? {}).some((l) => /^(Local|API) model/.test(l)); // HTTP and Python agents have turns, not tokens
     if (!u.calls || !models) return "";
     const known = (v) => (v == null ? "not reported" : v.toLocaleString());
     return `<section class="block"><div class="block-head"><h2>Calls, tokens and cost</h2><span class="note">As your model server reported. Tokens from discarded retries can't be seen, so your provider's bill is the real figure.</span></div>
       <dl class="factline"><div><dt>Calls</dt><dd>${u.calls}</dd></div><div><dt>Attempts</dt><dd>${u.attempts}</dd></div><div><dt>Input tokens</dt><dd>${known(u.input_tokens)}</dd></div><div><dt>Output tokens</dt><dd>${known(u.output_tokens)}</dd></div>
-      <div><dt>Cost</dt><dd>${u.priced ? (u.cost == null ? "unknown" : fmt(u.cost, 4)) : "no prices entered"}</dd></div></dl></section>`;
+      <div><dt>Cost</dt><dd>${u.priced ? (u.cost == null ? "unknown" : fmt(u.cost, 4)) : "no prices entered"}</dd></div></dl>
+      ${Object.keys(u.per_agent ?? {}).length ? `<div class="table-wrap"><table><caption class="sr-only">Tokens per agent</caption><thead><tr><th scope="col">Agent</th><th scope="col" class="num">Calls</th><th scope="col" class="num">Input tokens</th><th scope="col" class="num">Output tokens</th></tr></thead><tbody>${Object.entries(u.per_agent).map(([label, a]) => `<tr><th scope="row">${esc(names[label] ?? label)}</th><td class="num">${a.calls}</td><td class="num">${a.calls ? (a.unknown ? "not reported" : a.input_tokens.toLocaleString()) : "–"}</td><td class="num">${a.calls ? (a.unknown ? "not reported" : a.output_tokens.toLocaleString()) : "–"}</td></tr>`).join("")}</tbody></table></div>` : ""}</section>`;
   }
 
   function findingsBlock(sb) {
@@ -239,7 +259,7 @@ export function createSandboxUI({ main, h, render, shared }) {
   function profileView(doc, sb, names) {
     return `${warningsBlock(sb)}${findingsBlock(sb)}
       <section class="block"><div class="block-head"><h2>Behaviour profile</h2><span class="note">The dot is the mean, the band its 95% interval, and n counts repetitions (${sb.n_repetitions}; ${sb.n_completed} negotiations). Hover a measure's ⓘ for its definition.</span></div>${profileTable(sb, names)}</section>
-      ${usageBlock(sb)}`;
+      ${usageBlock(sb, names)}`;
   }
 
   function compareView(sb, names) {

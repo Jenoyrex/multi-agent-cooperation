@@ -36,6 +36,7 @@ from typing import Optional
 from dashboard import data as D
 from dashboard import demo, sandbox
 from lab import adapters, metrics
+from src.zero_cost import ZeroCostViolation
 from src.agents.prompting import INSTRUCTION_VARIANTS
 from src.environment.optimum import compute_optimal_welfare
 from src.environment.resources import DEFAULT_CATEGORY_NAMES, generate_resource_pool
@@ -277,6 +278,9 @@ def execute(ev: Evaluation, key: bytes, tokens: dict) -> None:
     except _Stop as why:
         _finish(ev, "stopped", {"title": str(why), "message": "The evaluation stopped early. Blocks that did not "
                                 "finish all 4 negotiations are excluded from every aggregate."})
+    except ZeroCostViolation:  # a choice, not a server error
+        from dashboard.sandbox import ZERO_COST_MESSAGE, ZERO_COST_TITLE
+        _finish(ev, "stopped", {"title": ZERO_COST_TITLE, "message": ZERO_COST_MESSAGE})
     except Exception as exc:  # noqa: BLE001 — shown as a safe message; the traceback goes to the server log
         traceback.print_exc()
         _finish(ev, "stopped", {"title": "Unexpected error", "detail": type(exc).__name__,
