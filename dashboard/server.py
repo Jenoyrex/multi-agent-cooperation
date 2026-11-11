@@ -39,6 +39,7 @@ no probe, no technical error detail in responses. Unset = everything above.
 """
 from __future__ import annotations
 
+import socket
 import argparse
 import asyncio
 import base64
@@ -305,9 +306,18 @@ class LabServer(ThreadingHTTPServer):
     """ThreadingHTTPServer with at most `max_connections` request threads. A connection
     beyond that is answered 503 and closed at once instead of queueing a new thread."""
 
+    # On Windows, SO_REUSEADDR lets a second process bind the same port, so two copies of the app would share it
+    # silently. There we bind exclusively instead, and a taken port is an error the caller can report.
+    allow_reuse_address = os.name != "nt"
+
     def __init__(self, address, handler, max_connections: int = MAX_CONNECTIONS):
         self._slots = threading.BoundedSemaphore(max_connections)
         super().__init__(address, handler)
+
+    def server_bind(self):
+        if os.name == "nt" and hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
 
     def process_request(self, request, client_address):
         if not self._slots.acquire(blocking=False):

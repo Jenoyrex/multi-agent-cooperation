@@ -87,7 +87,10 @@ def validate(req) -> dict:
     total = reps * len(conds) * (2 if swap_seats else 1) * (2 if swap_first else 1)
     if total > MAX_NEGOTIATIONS:
         raise WorkbenchError(f"This design has {total} negotiations; the limit is {MAX_NEGOTIATIONS}.", "repetitions")
-    name = str(req.get("name") or "").strip() or f"{defs['X']['name']} vs {defs['Y']['name']} · {env['name']}"
+    name = str(req.get("name") or "").strip()
+    if not name:  # the automatic name is shortened: the user never typed it, so it can't be their mistake
+        name = f"{defs['X']['name']} vs {defs['Y']['name']} · {env['name']}"
+        name = name if len(name) <= 80 else name[:79].rstrip() + "…"
     if len(name) > 80:
         raise WorkbenchError("Keep the name under 80 characters.", "name")
     cats = {A.KINDS[d["kind"]].category for d in defs.values()}

@@ -28,7 +28,9 @@ EXTRA = ("resource_set", "persona", "pre_event_optimal_welfare", "events_fired",
 
 def _csv(header, rows) -> str:
     buf = io.StringIO()
-    w = csv.writer(buf, lineterminator="\n")
+    # RFC 4180 row endings: with "\r\n" as the terminator every Python version quotes a field holding \r or \n
+    # (Python 3.10 did not quote a bare \r with "\n", so such a cell could split a row in a spreadsheet).
+    w = csv.writer(buf, lineterminator="\r\n")
     w.writerow(header)
     # A leading = + - @ (or tab / carriage return, per OWASP) would make a spreadsheet evaluate a name as a formula.
     w.writerows([["" if v is None else f"'{v}" if isinstance(v, str) and v and v[0] in "=+-@\t\r" else v for v in r] for r in rows])
@@ -112,7 +114,17 @@ def inference_md(inf: dict) -> str:
     return "\n".join(lines)
 
 
+def _cell(text) -> str:
+    """User text inside a Markdown table cell: no column breaks, no line breaks."""
+    return str(text).replace("\\", "\\\\").replace("|", "\\|").replace("\r", " ").replace("\n", " ")
+
+
 def report(doc: dict) -> str:
+    """The Markdown report. User text (names, messages) cannot add HTML: every "<" is written as "&lt;"."""
+    return _report(doc).replace("<", "&lt;")
+
+
+def _report(doc: dict) -> str:
     cfg, a, p = doc["config"], analyse(doc), doc["provenance"]
     env = cfg["environment"]
     agents = "\n".join(f"- {k}: **{d['name']}** ({d['kind']}), parameters `{json.dumps(d['params'])}`" for k, d in cfg["agents"].items())
@@ -141,7 +153,7 @@ def report(doc: dict) -> str:
     sweep_md = ""
     if sb["sweep"]:
         sweep_md = "\n## Comparison between groups\n" + sb["sweep"]["note"] + "\n\n| group | n | deals reached | difference | 95% CI |\n|---|---|---|---|---|\n" + "\n".join(
-            f"| {g['name']} | {g['outcomes']['agreement']['n']} | {_fmt(g['outcomes']['agreement']['mean'])} | "
+            f"| {_cell(g['name'])} | {g['outcomes']['agreement']['n']} | {_fmt(g['outcomes']['agreement']['mean'])} | "
             f"{_fmt(g['differences'].get('agreement', {}).get('mean'))} | {' to '.join(f'{x:.3f}' for x in (g['differences'].get('agreement', {}).get('ci') or [])) or 'n/a'} |"
             for g in sb["sweep"]["groups"]) + "\n"
     react_md = ""
@@ -150,7 +162,7 @@ def report(doc: dict) -> str:
         react_md = (f"\n## Reaction to resource events\nProtocol `sandbox_v1`. {r['n_reached']} of {r['n_negotiations']} negotiations reached the event. "
                     f"Mean best possible total (W*): {_fmt(r['pre_event_welfare']['mean'], 1)} before, {_fmt(r['final_welfare']['mean'], 1)} after.\n\n"
                     "| agent | demand before | demand after | change | 95% CI | n |\n|---|---|---|---|---|---|\n" + "\n".join(
-                        f"| {cfg['agents'][k]['name']} | {_fmt(v['before']['mean'])} | {_fmt(v['after']['mean'])} | {_fmt(v['shift']['mean'])} | "
+                        f"| {_cell(cfg['agents'][k]['name'])} | {_fmt(v['before']['mean'])} | {_fmt(v['after']['mean'])} | {_fmt(v['shift']['mean'])} | "
                         f"{' to '.join(f'{x:.3f}' for x in (v['shift']['ci'] or [])) or 'too few'} | {v['shift']['n']} |" for k, v in r["agents"].items()) + "\n")
     return f"""# {cfg['name']}
 
