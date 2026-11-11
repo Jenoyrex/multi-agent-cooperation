@@ -95,8 +95,11 @@ Uploaded Python is never executed by the server.
 | `http_local` | yes, loopback only | Your program behind `http://127.0.0.1…`, Agent Lab protocol; no token stored |
 | `python_upload` | **never** | Your uploaded file, inspected only (see below) |
 | `local_llm` | yes, loopback only | An open model on this computer through Ollama (loopback only); off in the public demo |
-| `claude`, `openai` | **locked** | Adapters exist; zero-cost mode refuses them |
-| `gemini` | **not implemented** | No adapter; the entry records a configuration only |
+| `prompt` | yes, local or your key | A model plus a persona, through a model connection: Ollama, LM Studio, OpenAI, Anthropic, Gemini or any OpenAI-compatible provider. With a key: estimate, hard token cap and consent first. Off in the public demo |
+| `http_remote` | yes, with consent | Your service on another machine; asks first; no secrets in the URL |
+| `python_file` | yes, with consent | Your file, in its own process with no keys and a time limit per turn, but with your permissions |
+| `claude`, `openai` | **locked** | The older direct adapters; zero-cost mode refuses them. Use a `prompt` agent with your key instead |
+| `gemini` | **legacy entry** | No direct adapter; use a `prompt` agent on the Google Gemini connection |
 
 ## Scenario format
 

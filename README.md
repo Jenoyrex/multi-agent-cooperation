@@ -34,6 +34,19 @@ you really want other machines to reach it). Your data stays in `~/.cooperation-
 - [Ollama](https://ollama.com): after installing, run `ollama pull llama3.2`. Default address `http://localhost:11434/v1`.
 - [LM Studio](https://lmstudio.ai): load a model and start its local server. Default address `http://localhost:1234/v1`.
 
+**Your own API key (optional).** A chat subscription (ChatGPT Plus, Claude Pro, Gemini Advanced) does **not** include an API
+key. API access is set up and billed separately, in each provider's developer console, and **you pay your provider** for what
+you use; this app never provides or pays for a key. Where to get one:
+
+| Provider | Create a key | Prices (official) |
+|---|---|---|
+| OpenAI | [platform.openai.com/api-keys](https://platform.openai.com/api-keys) | [Pricing](https://developers.openai.com/api/docs/pricing) |
+| Anthropic (Claude) | [platform.claude.com/settings/keys](https://platform.claude.com/settings/keys) | [Pricing](https://platform.claude.com/docs/en/about-claude/pricing) |
+| Google Gemini | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) | [Pricing](https://ai.google.dev/gemini-api/docs/pricing) (Google also has a free tier with limits; see that page) |
+
+Prices and free-tier limits change, so this README links to them instead of quoting them. Then open **Model connections** in the
+app, paste the key, and click **Test connection**.
+
 ## What you can do
 
 - **Import agents three ways.** A prompt agent (choose a model and write its instructions, no coding), your own service
@@ -52,20 +65,26 @@ you really want other machines to reach it). Your data stays in `~/.cooperation-
 
 - **Local by default.** The server binds to 127.0.0.1 unless you pass `--host`. Your experiments stay in your data folder.
 - **Keys** are entered in the app, or read from the environment or a local `.env` (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`,
-  `GEMINI_API_KEY`). Keys entered in the app stay in memory until you close it. They are never written to the database,
-  exports, reports or logs, and never sent back to the browser, which shows only `sk-…abcd`. Key routes answer only this
-  computer, same-origin.
+  `GEMINI_API_KEY`). A key entered in the app is kept **for this session only** (in memory) unless you choose **Save to my
+  .env**, which writes it in plain text to the `.env` in your data folder on this computer (refused if git could commit that
+  file). Keys are never written to the database, exports, reports or logs, and never sent back to the browser, which shows
+  only `sk-…abcd`. **Remove** forgets one key, **Forget all keys** clears the session. Key routes answer only this computer,
+  same-origin, and do not exist in the public demo.
 - **You pay your provider directly.** With an API key, you first see a token estimate and a cost from prices you enter (the app
   never guesses prices), set a hard token cap, and confirm "Run (uses your API key, you pay)". Your agent's turns go
-  to that provider, under its terms. The estimate is rough, and your provider's bill is the real figure.
+  to that provider, under its terms. During the run you see the tokens used against the cap, and it stops before the cap; after
+  it, the tokens per agent. The estimate is rough, and your provider's bill is the real figure.
+- **Clear errors.** A rejected key, missing credit or billing, a rate limit, an unknown model, a timeout and a local server that
+  is not running each get their own message and next step. The key never appears in one.
 - **Python files are not sandboxed from your computer.** Each runs in its own process with no API keys in its environment and
   a time limit per turn, but with your permissions: it could read your files, including `.env`. Only run files you trust.
 
 ## Limitations
 
 - Two agents per negotiation. Labels and profiles are keyed so this can grow; three or more is not built.
-- Prompt agents have been tested against a fake OpenAI-compatible server and a stub Anthropic client only. No real model, local
-  or paid, has been run by the project, so provider-specific problems may remain. Use "Test connection" first.
+- Prompt agents have been tested against a fake OpenAI-compatible server and a stub Anthropic client. One real local model
+  (Ollama, `llama3.2`) passed "Test connection" on the developer's computer; no paid model has been called by the project, so
+  provider-specific problems may remain. Use "Test connection" first.
 - Structured output depends on the model. A reply that isn't valid JSON for the action format is recorded as `invalid_action`, never
   repaired, so a weak model can show a high rule-breaking rate.
 - A sandbox experiment is not a controlled study. Models change, and a prompt agent's run may not repeat exactly.
@@ -74,7 +93,8 @@ you really want other machines to reach it). Your data stays in `~/.cooperation-
 
 ## Public demo
 
-**Live demo: _not deployed yet_.** The link is added here once the Render service is live and has been checked.
+**Live demo: [cooperation-lab.onrender.com](https://cooperation-lab.onrender.com/)** (Render free tier; the first visit after
+idling can take up to a minute). `/healthz` answers `{"status": "ok"}`.
 
 [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/Jenoyrex/multi-agent-cooperation)
 
@@ -140,11 +160,9 @@ This repository has two separate parts:
 
 ## Team
 
-College group project by:
-
-- [@Jenoyrex](https://github.com/Jenoyrex)
-- [@sujathaa-m](https://github.com/sujathaa-m)
-- [@4mh24cd002-stack](https://github.com/4mh24cd002-stack)
+College group project by **P J Jenoy Rex**, **Amulya H N** and **M Sujatha**, guided by **Prof. Harshitha**.
+GitHub: [@Jenoyrex](https://github.com/Jenoyrex), [@sujathaa-m](https://github.com/sujathaa-m),
+[@4mh24cd002-stack](https://github.com/4mh24cd002-stack). Contributions, from the git history: [docs/team.md](docs/team.md).
 
 ## Problem statement
 
@@ -263,6 +281,11 @@ Three explicit modes (`src/experiments/config.py`): `smoke` (≤5
 negotiations, mock or real), `pilot` (≤20 per batch), `full` (480, needs
 `--confirm` and a hard budget). Paid provider calls are also refused unless
 `ALLOW_PAID_PROVIDER_CALLS=1` is set. See `docs/spec.md` for the full policy.
+
+**The study uses your own keys too.** `scripts/run_pilot.py` reads `ANTHROPIC_API_KEY` and `OPENAI_API_KEY` from `.env`, and
+you pay Anthropic and OpenAI. Run it first **without** `--confirm`: that dry run validates the setup and prints the plan and its
+worst case, and makes no API call. Nothing paid runs without `--confirm`. Step by step: [docs/run-checklist.md](docs/run-checklist.md);
+estimates: [docs/budget-plan.md](docs/budget-plan.md).
 
 ## Running it
 
