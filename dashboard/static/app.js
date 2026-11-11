@@ -1388,6 +1388,7 @@ function turnDiagram(max) {
   return `<div class="diagram"><svg viewBox="0 0 ${W} ${y + 66}" role="img" aria-label="${max} alternating turns; the last turn is the deadline">${out}</svg></div>`;
 }
 /** Help: what the lab does, how a run works, and the words it uses. Definitions follow docs/spec.md. */
+const helpLink = (h, t) => `<a href="${h}" target="_blank" rel="noopener noreferrer">${t}</a>`;  // official pages, the same as sandbox/providers.py KEY_HELP (a test keeps them equal)
 function help() {
   const words = [
     ["Agent", "One of the two negotiators: a built-in rule-based strategy, a prompt agent (a model with your instructions), your own service over HTTP, or your own Python file."],
@@ -1415,10 +1416,29 @@ function help() {
     <li><b>Built-in rule-based strategies</b> run anywhere, at no cost.</li>
     ${st.demo ? `<li><b>This public demo</b> runs those only. Uploaded Python files are checked by reading their code and never executed. No keys, no model calls. <a href="#/run-locally">Run it on your computer</a> for everything below.</li>` : ""}
     <li><b>Local models</b> (Ollama, LM Studio) run on your computer, free.</li>
-    <li><b>API models</b> use your own key, and you pay your provider. You see an estimate and set a hard cap first. Keys are never saved, exported or logged.</li>
+    <li><b>API models</b> use your own key, and you pay your provider. You see an estimate and set a hard cap first. Keys stay in memory, or in your own <code>.env</code> if you choose; never in the database, exports, reports or logs.</li>
     <li><b>HTTP agents</b> are your own services. One on another machine asks you to confirm first.</li>
     <li><b>Python files</b> run on your computer after you confirm, in a separate process with no keys and a time limit, but with your permissions: only run files you trust.</li>
     ${st.demo ? "<li><b>This public demo</b> is shared and temporary: everything visitors create is visible to everyone, cannot be edited or deleted, and is erased when the server restarts.</li>" : ""}</ul></section>
+  <section class="block" id="api-keys">${blockHead("How to get an API key")}
+    <p><b>A chat subscription is not an API key.</b> ChatGPT Plus, Claude Pro and Gemini Advanced do not include API access. Each provider sets up and bills API use separately, in its developer console, and you pay the provider for what you use. This app never provides or pays for a key.</p>
+    <div class="table-wrap"><table><thead><tr><th scope="col">Provider</th><th scope="col">Create a key</th><th scope="col">Billing</th><th scope="col">Prices</th></tr></thead><tbody>
+      ${[["OpenAI", "https://platform.openai.com/api-keys", "https://platform.openai.com/account/billing/overview", "https://developers.openai.com/api/docs/pricing"],
+         ["Anthropic (Claude)", "https://platform.claude.com/settings/keys", "https://platform.claude.com/settings/billing", "https://platform.claude.com/docs/en/about-claude/pricing"],
+         ["Google Gemini", "https://aistudio.google.com/apikey", "https://ai.google.dev/gemini-api/docs/billing", "https://ai.google.dev/gemini-api/docs/pricing"]]
+        .map(([n, k, b, p]) => `<tr><th scope="row">${n}</th><td>${helpLink(k, "API keys")}</td><td>${helpLink(b, "Billing")}</td><td>${helpLink(p, "Pricing")}</td></tr>`).join("")}</tbody></table></div>
+    <p class="note">Google also offers a free tier with limits; its pricing page has the current terms. Prices and limits change, so this app links to them and never quotes them. Then add the key under <a href="#/models">Model connections</a>: it is kept for this session only unless you choose to save it to your <code>.env</code>.</p></section>
+  <section class="block" id="ollama">${blockHead("How to install Ollama (free, local)")}<ol class="plainlist">
+    <li>Download Ollama from ${helpLink("https://ollama.com/download", "ollama.com/download")} and open it.</li>
+    <li>Download a model (about 2 GB): <code>ollama pull llama3.2</code></li>
+    <li>If it is not already running, start it: <code>ollama serve</code></li>
+    <li>In <a href="#/models">Model connections</a>, click <b>Find models</b> on Ollama, then <b>Test connection</b>.</li></ol>
+    <p class="note">LM Studio works too: ${helpLink("https://lmstudio.ai/docs/developer/core/server", "start its local server")}, then use the LM Studio connection.</p></section>
+  <section class="block" id="sandbox-vs-study">${blockHead("Sandbox vs Research study")}<div class="table-wrap"><table><thead><tr><th scope="col"></th><th scope="col">Sandbox (this app)</th><th scope="col">Research study</th></tr></thead><tbody>
+    <tr><th scope="row">Purpose</th><td>Explore any agents you bring</td><td>One preregistered comparison of two instruction strategies</td></tr>
+    <tr><th scope="row">Agents</th><td>Rule-based, local models, your API keys, HTTP services, Python files</td><td>One Claude model and one GPT model, fixed in advance</td></tr>
+    <tr><th scope="row">Results</th><td>Exploratory, labelled with their data source</td><td>None yet: the study has not been run</td></tr>
+    <tr><th scope="row">Where it runs</th><td>Here, in the browser</td><td><code>scripts/run_pilot.py</code> with your own keys in <code>.env</code></td></tr></tbody></table></div></section>
   <section class="block">${blockHead("The research study")}<p>The lab was built for a preregistered study comparing the two instruction conditions with one Claude model and one GPT model: 60 situations, each run 8 ways (2 seatings × 2 first movers × 2 conditions), 480 negotiations in all. <b>It has not been run yet, so there are no results.</b> <a href="#/study">Read about the study</a>.</p></section>
   <section class="block">${blockHead("More tools")}<ul class="ilist">
     <li><a class="irow" href="#/try"><span class="imain"><b>Try a single negotiation</b><span class="sub">Set up one negotiation and watch it turn by turn.</span></span>${icon("chev-r")}</a></li>
@@ -1546,6 +1566,7 @@ function runRecords(s) {
     <dl class="readouts">${["pilot", "full"].map((m) => { const sp = spent(m), cp = cap(m); return readout(m === "pilot" ? "Pilot spend" : "Full-run spend", sp === null ? "—" : `$${fmt(sp, 4)}`, cp ? `of $${cp} cap` : "no cap recorded"); }).join("")}
     ${readout("Aborted attempts", s.progress.aborted_attempts, "infrastructure only")}${readout("Runs recorded", s.runs.length, s.runs.length ? `last ${esc(timeAgo(s.runs.at(-1).started_at))}` : "none yet")}</dl></section>
   <section class="block">${blockHead("Runs", "One row per batch of negotiations")}
+    ${notice("", "lock", "<b>The study runs with your own API keys.</b> <code>scripts/run_pilot.py</code> reads <code>ANTHROPIC_API_KEY</code> and <code>OPENAI_API_KEY</code> from your <code>.env</code> (see <code>.env.example</code>), and you pay Anthropic and OpenAI for the calls. A chat subscription is not an API key. Run the script first without <code>--confirm</code>: this dry run checks the setup and prints the plan and its worst-case cost, and makes no API call. Nothing paid runs without <code>--confirm</code>, and the zero-cost guard also needs <code>ALLOW_PAID_PROVIDER_CALLS=1</code>. See <code>docs/run-checklist.md</code>.")}
     ${s.runs.length ? `<div class="table-wrap"><table><thead><tr><th>Run</th><th>Status</th><th>Dataset</th><th>Condition</th><th>Started</th><th class="num">Done</th><th class="num">Aborted</th><th class="num">Tokens in / out</th><th class="num">Cost</th><th>Code</th></tr></thead><tbody>
     ${s.runs.map((r) => { const t = r.totals ?? {}; const stale = r.code_version !== cur.code_version.replace("+dirty", "") && r.code_version !== cur.code_version;
       return `<tr><td class="mono">${esc(short(r.run_id, 10))}</td><td><span class="badge ${tone[r.status] ?? ""}">${esc(r.status)}</span></td><td>${esc(r.mode)}</td><td>${cond(r.method)}</td>

@@ -107,3 +107,15 @@ def test_post_guard_refuses_cross_origin_and_non_json():
         assert c.getresponse().status == 405  # research endpoints stay read-only
     finally:
         srv.shutdown()
+
+
+def test_zero_cost_refusal_is_explained_not_an_unexpected_error(monkeypatch):
+    """A paid model in zero-cost mode is the user's setting, not a server fault (no network: the guard refuses first)."""
+    from src import zero_cost
+    monkeypatch.delenv(zero_cost.ENV, raising=False)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-DUMMY0000000000000000TEST")
+    with zero_cost.network_tripwire() as blocked:
+        run = S.start({**REQ, "agents": {"A": "claude", "B": "claude"}}, background=False)
+    assert blocked == []
+    err = run.view()["error"]
+    assert err["title"] == S.ZERO_COST_TITLE and "Experiments" in err["message"] and "DUMMY" not in json.dumps(err)
