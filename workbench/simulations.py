@@ -191,7 +191,15 @@ class Simulation:
             return {"id": self.id, "created": self.created, "finished": self.finished, "status": self.status,
                     "config": self.cfg, "plan_size": len(self.plan), "trials": list(self.trials), "log": list(self.log),
                     "error": self.error, "provenance": self.provenance, "stop_reason": self.stop_reason,
-                    "live": None if self.live is None else {**self.live, "turns": list(self.live["turns"])}}
+                    "live": None if self.live is None else {**self.live, "turns": list(self.live["turns"])},
+                    "spend": self._spend()}
+
+    def _spend(self) -> Optional[dict]:
+        """Tokens (and cost, if priced) the capped models have used so far, against the cap. Updated after every call."""
+        b = getattr(self, "budget", None)
+        if b is None:
+            return None
+        return {"tokens": b.spent_tokens, "token_cap": b.max_total_tokens, "cost": b.spent_cost_usd if b.prices else None, "cost_cap": b.max_cost_usd}
 
 
 def _claims(alloc: Optional[dict], seat: str, pool: dict) -> Optional[dict]:
@@ -208,6 +216,11 @@ def _pool_at(turn: int, pool: dict, fired: list[dict]) -> dict:
 
 def _usage(calls: list[dict], cfg: dict) -> dict:
     return summarize_calls(calls, X.price_map(cfg))
+
+
+def _usage_by_agent(calls: list[dict], seats: dict, cfg: dict) -> dict:
+    """Calls and tokens per agent (by label), from the per-call log. Rule-based agents make no calls."""
+    return {label: _usage([c for c in calls if c.get("actor") == seat], cfg) for seat, label in seats.items()}
 
 
 async def _run_session(session, agents: list) -> object:
@@ -235,6 +248,7 @@ def _trial(spec: dict, record, inst: dict, label_of: dict, fired: Optional[list]
             "optimal_allocation": inst["optimal_allocation"], "final_allocation": record.final_allocation,
             "events": D.events_for(transcript, record.calls, record),
             "usage": {k: getattr(record, k) for k in ("api_calls", "api_attempts", "input_tokens", "output_tokens", "latency_s", "cost_usd")},
+            "usage_by_agent": _usage_by_agent(record.calls, spec["seats"], cfg or {}),
             "final_pool": record.resource_pool, "final_valuation": {"A": record.valuation_A, "B": record.valuation_B},
             "valuation": inst["valuation"], "events_fired": fired, "pre_event_optimal_welfare": inst["optimal_welfare"],
             "agents": {label: {"seat": seat, "name": label_of[label],
@@ -249,7 +263,7 @@ def execute(sim: Simulation) -> None:
     cfg, envs = sim.cfg, _environments(sim.cfg)
     label_of = {k: d["name"] for k, d in cfg["agents"].items()}
     events, prices = cfg.get("events") or [], X.price_map(cfg)
-    budget = X.budget_for(cfg)
+    budget = sim.budget = X.budget_for(cfg)
     persona_text = {p["name"]: p["text"] for p in cfg.get("personas") or []}
     models = any(X.is_model(d) for d in cfg["agents"].values())
     failures = 0  # in a row; a wrong key or a stopped server would fail every remaining negotiation the same way
@@ -292,7 +306,8 @@ def execute(sim: Simulation) -> None:
                 sim.note(f"Negotiation {where}: {record.outcome.replace('_', ' ')} after {record.num_rounds} turn(s).")
             except NegotiationAborted as exc:
                 trial = {**spec, "status": "aborted", "reason": exc.reason, "detail": keys.redact(exc.detail), "round": exc.round_number,
-                         "actor": exc.actor, "pool": inst["pool"], "usage": _usage(exc.calls, cfg)}
+                         "actor": exc.actor, "pool": inst["pool"], "usage": _usage(exc.calls, cfg),
+                         "usage_by_agent": _usage_by_agent(exc.calls, spec["seats"], cfg)}
                 sim.note(f"Negotiation {where}: aborted ({exc.reason}) in turn {exc.round_number}; not an outcome.", "warn")
                 failures += 1
                 if exc.reason == "budget_exhausted":

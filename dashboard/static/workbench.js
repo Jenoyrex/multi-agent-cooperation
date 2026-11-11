@@ -276,6 +276,13 @@ export function createWorkbench({ main, h, render, onCleanup, motion }) {
       const label = form.querySelector(`[data-out="${el.dataset.param}"]`);
       if (label) label.textContent = `${Math.round(Number(el.value) * 100)}%`;
     }));
+    form.querySelector('[data-param="connection"]')?.addEventListener("change", () => { // a model found on one connection means nothing on another
+      const model = form.querySelector('[data-param="model"]');
+      if (model && (state.modelList ?? []).includes(model.value)) model.value = d.params.model = "";
+      state.modelList = []; state.test = null;
+      const list = form.querySelector("#model-options"); if (list) list.innerHTML = "";
+      if (["ollama", "lmstudio"].includes(d.params.connection)) form.querySelector("[data-find]")?.click();
+    });
     if (arg === "new/llm") { // the name follows the model until the user types their own
       const model = form.querySelector('[data-param="model"]'), name = form.querySelector('[data-k="name"]');
       let was = model.value;
@@ -672,6 +679,10 @@ export function createWorkbench({ main, h, render, onCleanup, motion }) {
       ${item("Timed out", s.outcomes.timeout)}${item("Invalid", s.outcomes.invalid_action)}${item("Offers", `${c.offers} <span class="sub">(${c.rejected} rejected, ${c.accepted} accepted)</span>`)}${item("Elapsed", elapsed(doc))}</dl>`;
   }
 
+  // Tokens the capped (API) models have used so far, against the hard cap. Updated after every call.
+  const spendLine = (doc) => !doc.spend ? "" : `<h2 class="wb-h3">Tokens used</h2><p class="spend"><b>${doc.spend.tokens.toLocaleString()}</b> of ${doc.spend.token_cap == null ? "no token cap" : `${doc.spend.token_cap.toLocaleString()} (cap)`}${doc.spend.cost != null ? `<span class="sub">cost so far ${doc.spend.cost.toFixed(4)} at your prices</span>` : ""}</p>
+    ${doc.spend.token_cap ? `<progress max="${doc.spend.token_cap}" value="${Math.min(doc.spend.tokens, doc.spend.token_cap)}" aria-label="Tokens used of the cap"></progress>` : ""}`;
+
   function livePanel(doc) {
     const cfg = doc.config, live = doc.live;
     const outcomesBlock = `<h3 class="wb-h4">${doc.status === "running" ? "Outcomes so far" : "How each negotiation ended"}</h3>${tape(doc)}${tapeLegend(doc)}`;
@@ -689,6 +700,7 @@ export function createWorkbench({ main, h, render, onCleanup, motion }) {
         <p class="wb-thinking" id="live-thinking" aria-live="polite">${live.thinking ? `<i></i>${esc(seatName(doc, sp.seats, live.thinking.seat))} is deciding turn ${live.thinking.round}…` : ""}</p></div>
       <aside class="sheet wb-aside"><h2 class="wb-h3">At the table</h2><dl class="kvs">${["A", "B"].map((s) => `<dt>Seat ${s}</dt><dd><i class="wb-dot" style="--c:${AGENT_COLOR[sp.seats[s]]}"></i>${esc(seatName(doc, sp.seats, s))}</dd>`).join("")}</dl>
         <h2 class="wb-h3">On the table</h2><dl class="kvs">${Object.entries(live.pool).map(([c, q]) => `<dt>${esc(c)}</dt><dd>${q} ${esc(cfg.environment.meta?.[c]?.unit ?? "units")}</dd>`).join("")}</dl>
+        <div id="live-spend" aria-live="polite">${spendLine(doc)}</div>
         <button type="button" class="btn" id="cancel-sim">${icon("x")}Stop the experiment</button></aside></div></section>`;
   }
 
@@ -938,6 +950,7 @@ export function createWorkbench({ main, h, render, onCleanup, motion }) {
       if (!list || doc.live?.index !== index) { index = doc.live?.index; paint(); seen = doc.live?.turns.length ?? 0; return; }
       const fresh = doc.live.turns.slice(seen);
       if (fresh.length) { list.insertAdjacentHTML("beforeend", fresh.map((t) => turnRow(t, doc, doc.live.spec.seats)).join("")); fade([...list.children].slice(-fresh.length)); seen += fresh.length; }
+      const sp = main.querySelector("#live-spend"); if (sp) sp.innerHTML = spendLine(doc);
       const th = doc.live.thinking;
       main.querySelector("#live-thinking").innerHTML = th ? `<i></i>${esc(seatName(doc, doc.live.spec.seats, th.seat))} is deciding turn ${th.round}…` : "";
       main.querySelector("#live-stats").outerHTML = liveStats(doc);

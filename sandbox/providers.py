@@ -28,6 +28,19 @@ PRESETS = {p["id"]: p for p in (
     {"id": "gemini", "name": "Google Gemini", "tier": "api", "api": "openai", "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
      "structured": "json_schema", "tokens_param": "max_tokens", "help": "Your own Gemini key, through Google's OpenAI-compatible endpoint (which Google calls beta). You pay Google directly."},
 )}
+# Official pages, checked 2026-11-11 (docs/references.md). Prices and free-tier limits change: we link, never quote.
+KEY_HELP = {
+    "openai": {"console": "https://platform.openai.com/api-keys", "billing": "https://platform.openai.com/account/billing/overview",
+               "pricing": "https://developers.openai.com/api/docs/pricing",
+               "subscription": "https://help.openai.com/en/articles/8156019", "free_tier": False},
+    "anthropic": {"console": "https://platform.claude.com/settings/keys", "billing": "https://platform.claude.com/settings/billing",
+                  "pricing": "https://platform.claude.com/docs/en/about-claude/pricing",
+                  "subscription": "https://support.claude.com/en/articles/9876003", "free_tier": False},
+    "gemini": {"console": "https://aistudio.google.com/apikey", "billing": "https://ai.google.dev/gemini-api/docs/billing",
+               "pricing": "https://ai.google.dev/gemini-api/docs/pricing", "subscription": None, "free_tier": True},
+}
+SUBSCRIPTION_NOTE = ("A chat subscription (ChatGPT Plus, Claude Pro, Gemini Advanced) does not include an API key. "
+                     "API access is set up and billed separately, in the provider's developer console.")
 CUSTOM_HELP = {"local": "An OpenAI-compatible server on this computer.",
                "api": "Any OpenAI-compatible provider, such as Groq (https://api.groq.com/openai/v1) or OpenRouter (https://openrouter.ai/api/v1). You pay them directly."}
 
@@ -75,7 +88,8 @@ def public(conn: dict) -> dict:
     """What the page may see: a masked key at most."""
     cid = conn["id"]
     return {**{k: conn.get(k) for k in ("id", "name", "tier", "api", "base_url", "structured", "rpm", "help")},
-            "builtin": cid in PRESETS, "needs_key": needs_key(conn), "key": keys.masked(cid), "key_source": keys.source(cid)}
+            "builtin": cid in PRESETS, "needs_key": needs_key(conn), "key": keys.masked(cid), "key_source": keys.source(cid),
+            "key_saved": needs_key(conn) and keys.in_env_file(cid), "key_help": KEY_HELP.get(cid)}
 
 
 def listing() -> list[dict]:
@@ -96,16 +110,49 @@ def client(conn: dict, timeout_s: float = TIMEOUT_S):
     return openai.AsyncOpenAI(api_key=key or "local", base_url=conn["base_url"], timeout=timeout_s, max_retries=0)
 
 
-def _failure(exc: Exception, conn: dict) -> dict:
+START_LOCAL = {"ollama": "Start Ollama (open the Ollama app, or run: ollama serve), then try again.",
+               "lmstudio": "Open LM Studio, load a model and start its local server (Developer tab), then try again."}
+# OpenAI: 429 insufficient_quota; Anthropic: 400 "credit balance is too low"; others: 402 or a billing message.
+# A bare "quota" is not here: Gemini's per-minute RESOURCE_EXHAUSTED says "quota" and is a rate limit.
+_QUOTA = ("insufficient_quota", "credit balance", "billing", "payment required", "exceeded your current quota")
+_BAD_KEY = ("api_key_invalid", "invalid api key", "invalid x-api-key", "incorrect api key", "api key not valid", "authentication")
+
+
+def classify(exc: BaseException, conn: dict) -> dict:
+    """What went wrong, in words a user can act on: {kind, title, hint}. The key never appears: hints name pages, not values."""
     code = getattr(exc, "status_code", None)
     name = type(exc).__name__
-    title, hint = {401: ("The key was rejected", "Check the API key."), 403: ("Not allowed", "This key may not use that model."),
-                   404: ("Not found", "Check the base URL and the model name."),
-                   429: ("Rate limited or out of credit", "Wait a moment, or check your provider account.")}.get(
-        code, ("The request timed out", "The server took too long to answer.") if "Timeout" in name else
-        ("Could not reach the server", "Is it running?" if conn["tier"] == "local" else "Check your connection and the base URL.")
-        if "Connection" in name else (f"The server answered with an error{f' ({code})' if code else ''}", ""))
-    return {"ok": False, "title": title, "hint": hint, "status": code, "detail": keys.redact(f"{name}: {exc}")[:300]}
+    text = f"{getattr(exc, 'body', '') or ''} {exc}".lower()
+    help_ = KEY_HELP.get(conn.get("id"), {})
+    where = f" ({help_['billing']})" if help_.get("billing") else ""
+    if "Timeout" in name:
+        return {"kind": "timeout", "title": "The request timed out", "hint": "The server took too long to answer. Try again, or choose a smaller model."}
+    if code is None and ("Connection" in name or "connect" in text):
+        if conn.get("tier") == "local":
+            return {"kind": "local_not_running", "title": f"{conn.get('name', 'The local server')} is not running",
+                    "hint": START_LOCAL.get(conn.get("id"), "Start your local model server, check its address, then try again.")}
+        return {"kind": "network", "title": f"Could not reach {conn.get('name', 'the provider')}", "hint": "Check your internet connection and the base URL."}
+    if code == 401 or (code == 400 and any(s in text for s in _BAD_KEY)):
+        return {"kind": "invalid_key", "title": "Your API key was rejected",
+                "hint": "Check that you copied the whole key. You can create a new one in your provider's console" + (f" ({help_['console']})." if help_.get("console") else ".")}
+    if code == 402 or (code in (400, 403, 429) and any(s in text for s in _QUOTA)):
+        return {"kind": "no_credit", "title": "No credit, or billing is not set up",
+                "hint": f"API use is billed separately from any chat subscription. Add credit or a payment method in your provider's billing settings{where}."}
+    if code == 403:
+        return {"kind": "forbidden", "title": "This key is not allowed to do that",
+                "hint": "Your key or project may not have access to this model. Check its permissions in your provider's console."}
+    if code == 429:
+        return {"kind": "rate_limited", "title": "Rate limited", "hint": "Too many requests for now. Wait a minute and try again, or set a lower requests-per-minute limit."}
+    if code == 404 or (code == 400 and "model" in text and any(s in text for s in ("not found", "does not exist", "not_found", "unknown model"))):
+        return {"kind": "model_not_found", "title": "Model not found", "hint": "Choose a model from the list (Refresh models), and check the base URL."}
+    if code is not None and code >= 500:
+        return {"kind": "provider_error", "title": f"The provider had a problem ({code})", "hint": "This is on their side. Try again later."}
+    return {"kind": "other", "title": f"The server answered with an error{f' ({code})' if code else ''}", "hint": "See the details below."}
+
+
+def _failure(exc: Exception, conn: dict) -> dict:
+    return {"ok": False, **classify(exc, conn), "status": getattr(exc, "status_code", None),
+            "detail": keys.redact(f"{type(exc).__name__}: {exc}")[:300]}
 
 
 async def _close(cl) -> None:

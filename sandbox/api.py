@@ -20,7 +20,8 @@ def get(path: str) -> tuple[dict, int]:
     policy.require_local()
     if path == "/api/models/connections":
         return {"connections": providers.listing(), "structured_modes": list(providers.STRUCTURED),
-                "custom_help": providers.CUSTOM_HELP}, 200
+                "custom_help": providers.CUSTOM_HELP, "subscription_note": providers.SUBSCRIPTION_NOTE,
+                "env_file": str(keys.env_file())}, 200
     return {"error": "not found"}, 404
 
 
@@ -59,18 +60,34 @@ def _set_key(req):
         raise WorkbenchError("That does not look like an API key.", "key")
     if not providers.needs_key(conn):
         raise WorkbenchError(f"{conn['name']} runs on this computer and needs no key.", "connection")
-    keys.set_key(conn["id"], key.strip())
+    save = req.get("save", "session")
+    if save not in ("session", "env_file"):
+        raise WorkbenchError("Choose where to keep the key: this session only, or your .env file.", "save")
+    if save == "env_file":
+        try:
+            keys.save_to_env(conn["id"], key.strip())
+        except keys.KeyFileError as exc:
+            raise WorkbenchError(str(exc), "save") from None
+    else:
+        keys.set_key(conn["id"], key.strip())
     return providers.public(conn), 200
 
 
 def _remove_key(req):
-    conn = providers.require(_obj(req).get("connection"), "connection")
-    keys.remove(conn["id"])
+    req = _obj(req)
+    conn = providers.require(req.get("connection"), "connection")
+    keys.remove(conn["id"], from_env_file=req.get("from_env_file") is True)
     return providers.public(conn), 200
+
+
+def _forget_all(req):
+    keys.forget_session()
+    return {"connections": providers.listing()}, 200
 
 
 def post_route(path: str) -> Optional[Callable]:
     fixed = {"/api/models/connections": _save_connection, "/api/models/keys": _set_key, "/api/models/keys/delete": _remove_key,
+             "/api/models/keys/forget": _forget_all,
              "/api/models/list": lambda req: (providers.list_models(_obj(req).get("connection")), 200),
              "/api/models/test": lambda req: (providers.test_connection(_obj(req).get("connection"), req.get("model")), 200)}
     if path in fixed:
