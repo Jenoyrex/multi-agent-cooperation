@@ -40,6 +40,7 @@ no probe, no technical error detail in responses. Unset = everything above.
 from __future__ import annotations
 
 import socket
+import socketserver
 import argparse
 import asyncio
 import base64
@@ -315,9 +316,12 @@ class LabServer(ThreadingHTTPServer):
         super().__init__(address, handler)
 
     def server_bind(self):
+        """Bind without http.server's reverse DNS lookup (socket.getfqdn), which can take many seconds on macOS and only
+        fills a name this app never uses."""
         if os.name == "nt" and hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
             self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
-        super().server_bind()
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = str(self.server_address[0]), self.server_address[1]
 
     def process_request(self, request, client_address):
         if not self._slots.acquire(blocking=False):

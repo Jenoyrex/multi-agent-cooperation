@@ -154,3 +154,18 @@ def test_h08_error_hints_name_buttons_that_exist():
     assert "Find models" in hint
     ui = (ROOT / "dashboard" / "static" / "sandboxui.js").read_text(encoding="utf-8") + (ROOT / "dashboard" / "static" / "workbench.js").read_text(encoding="utf-8")
     assert "Find models" in ui and "Refresh models" not in ui
+
+
+# H-11: http.server's bind does a reverse DNS lookup (socket.getfqdn) that can hang for many seconds on macOS; every test
+# server and every app start paid it, and the macOS CI jobs never finished
+def test_h11_starting_the_server_does_no_reverse_dns_lookup(monkeypatch):
+    import socket
+
+    def slow(*a, **k):
+        raise AssertionError("socket.getfqdn was called")
+    monkeypatch.setattr(socket, "getfqdn", slow)
+    srv = SV.LabServer(("127.0.0.1", 0), partial(SV.Handler, directory=str(SV.STATIC)))
+    try:
+        assert srv.server_port == srv.server_address[1] and srv.server_name == "127.0.0.1"
+    finally:
+        srv.server_close()
