@@ -82,3 +82,63 @@ def test_h05_a_line_break_inside_a_cell_stays_inside_the_cell():
     import csv, io
     text = export._csv(["name", "n"], [["two\rlines", 1], ["three\nlines\r\nhere", 2]])
     assert list(csv.reader(io.StringIO(text, newline=""))) == [["name", "n"], ["two\rlines", "1"], ["three\nlines\r\nhere", "2"]]
+
+
+# H-06: "resources: food=3, food=4" silently kept food=4
+def test_h06_a_resource_listed_twice_is_an_error_not_a_silent_overwrite():
+    from workbench import environments as E
+    from workbench.agents import WorkbenchError
+    with pytest.raises(WorkbenchError, match="listed twice"):
+        E.parse_text("name: T\nresources: food=3, food=4, water=2\nA: food=50, water=50\nB: food=40, water=60")
+
+
+def test_python_file_agents_never_inherit_saved_custom_keys(monkeypatch):
+    """Keys saved for custom connections use COOPERATION_LAB_KEY_*; the Python agent's child must not see them."""
+    from sandbox import python_agent
+    monkeypatch.setenv("COOPERATION_LAB_KEY_ABCDEF012345", "sk-DUMMY000000000000000")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-DUMMY000000000000001")
+    env = python_agent.child_env()
+    assert not any("KEY" in k for k in env) and "sk-DUMMY" not in repr(env)
+
+
+def test_an_empty_model_reply_is_an_invalid_action_never_repaired(tmp_path, monkeypatch):
+    from tests.sandbox_fake import FakeModels
+    from tests.test_sandbox_models import agent, connection, design, run
+    monkeypatch.setattr(store, "DB_PATH", tmp_path / "w.db")
+    fake = FakeModels()
+    try:
+        doc = run(design(agent(connection(fake), "empty")))
+        t = doc["trials"][0]
+        assert t["status"] == "completed" and t["outcome"] == "invalid_action" and t["invalid_reason"]
+    finally:
+        fake.close()
+
+
+def test_the_network_dropping_mid_run_stops_cleanly_with_a_plain_reason(tmp_path, monkeypatch):
+    """The model server goes away after the first experiment call: the run stops, nothing is counted as an outcome."""
+    from tests.sandbox_fake import FakeModels
+    from tests.test_sandbox_models import agent, connection, design
+    monkeypatch.setattr(store, "DB_PATH", tmp_path / "w.db")
+    monkeypatch.setattr("sandbox.model_agent.BACKOFF_S", 0.0)
+    fake = FakeModels()
+    aid = agent(connection(fake))
+    real = fake.server.RequestHandlerClass.do_POST
+
+    def drop_after_first(handler):
+        if len(fake.chats()) >= 1:
+            handler.close_connection = True
+            handler.connection.close()  # the network is gone
+            return
+        real(handler)
+    fake.server.RequestHandlerClass.do_POST = drop_after_first
+    try:
+        sim = S.start(design(aid, repetitions=5), background=False)
+        doc = S.get(sim.id)
+        assert doc["status"] == "cancelled" and doc["stop_reason"]
+        assert all(t["status"] != "completed" or t.get("outcome") for t in doc["trials"])
+        aborted = [t for t in doc["trials"] if t["status"] == "aborted"]
+        assert aborted and all("not an outcome" not in (t.get("outcome") or "") for t in aborted)
+        assert "Could not reach" in doc["stop_reason"] or "not running" in doc["stop_reason"] or "connection" in doc["stop_reason"].lower()
+    finally:
+        fake.server.RequestHandlerClass.do_POST = real
+        fake.close()
