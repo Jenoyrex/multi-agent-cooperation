@@ -75,6 +75,34 @@ sideways (decorative background layer, out of scope).
 docs/references.md (VERIFIED/TO CONFIRM), team.md (from git history), budget-plan.md (dry-run figures),
 run-checklist.md, viva-qa.md (15 Q&As), sandbox-metrics.md (per-agent and live usage).
 
+**Loop 6 (ship).** One combined PR (#12), check green, merged with a merge commit. After the merge: the Render deploy,
+`/healthz`, the live demo's lockout and `pip install git+...` in a fresh venv are checked (final report has the results).
+
 ## Blockers
 
+Final tests on this branch: 757 pytest + 24 node = **781** passing (start: 749).
+
+None. Not done by design: no paid call (needs your keys and go-ahead), no repository settings changed.
+
 ## APPROVAL BATCH
+
+Reply with the numbers you approve.
+
+1. Bump `pyproject.toml` to 1.0.0, tag `v1.0.0` on main and publish a GitHub Release (notes drafted).
+2. Close stale PR #1 (`docs/readme-at-a-glance`, README edits superseded by main).
+3. Delete merged branches, local and on GitHub: `amulya-work`, `chore/progress-script`, `ci/render-deploy-hook`,
+   `docs/readme-at-a-glance` (after 2), `docs/readme-refresh`, `feat/byo-keys`, `feat/full-run`, `feat/completion`,
+   `sandbox-v2`, `sujatha-fix`, `ui/motion`, `ui/premium-minimal`, `ui/simple`. **Kept:** `ui-simplify` (its worktree has
+   your 3 uncommitted files).
+4. Remove clean worktrees: `../mini-project-sandbox`, `.kilo/worktrees/reflective-snail` (detached, already in main),
+   `../mini-project-complete`. **Kept:** `../mini-project-ui`. `refs/original`: none exist, nothing to do.
+5. Delete the GitHub repo `Jenoyrex/multi-agent-cooperation-old`, after a mirror clone and a bundle to
+   `C:\Users\230930\Downloads\backups\multi-agent-cooperation-old.git` and `...old.bundle`, verified with `git bundle verify`.
+6. Official project title: keep "Cooperation Lab" (app) and "Cooperative capabilities in multi-agent LLM negotiation"
+   (study)? TO CONFIRM.
+7. Team details in docs/team.md: confirm @4mh24cd002-stack is Amulya H N, the guide's title and each member's non-code work.
+8. Paid pilot (`--max-cost-usd 20`, your own keys): a team and guide decision, not something I will run.
+9. Remove the two local launch entries I added to `.claude/launch.json` (gitignored; `completion-local`, `completion-demo`).
+
+No new dependency is needed. No contrast failure found in the sampled text, so no theme change is needed (the light
+"good" badge is closest to the AA limit, at about 4.6:1).
