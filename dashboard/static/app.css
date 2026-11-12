@@ -1479,3 +1479,59 @@ td.metric .sub { display: block; }
   .report .fulldetails > summary .sub { display: none; }
   .report .keynums-grid > div, .report .agentcard, .report .readhint { break-inside: avoid; }
 }
+
+/* ------------------------------------------------------------ wallpaper and window
+   Like a desktop: the wallpaper is the same in light and dark; the theme lives on the window above it.
+   Two soft lights in the agents' colours (blue = Agent X, orange = Agent Y) drift slowly toward and away
+   from each other over a graphite field: two parties negotiating over shared ground. Only transform
+   moves (compositor-only); cycles are 60 s and longer, far from the 0.2 Hz range to avoid; reduced motion
+   (system or Settings) stops it. Text never sits on the wallpaper: the window is opaque. */
+:root {
+  --wp-base: #15171b;
+  --wp-x: 58, 134, 229;   /* Agent X blue */
+  --wp-y: 217, 96, 44;    /* Agent Y orange */
+}
+html {
+  background:
+    radial-gradient(120% 90% at 50% 0%, rgba(255, 255, 255, .045), transparent 60%),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .05 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"),
+    var(--wp-base);
+}
+body { background: transparent; }
+body::before, body::after {
+  content: ""; position: fixed; z-index: -1; pointer-events: none; width: 78vmax; height: 78vmax; border-radius: 50%;
+  will-change: transform; animation-timing-function: cubic-bezier(.45, 0, .55, 1); animation-iteration-count: infinite; animation-direction: alternate;
+}
+body::before {
+  left: -30vmax; top: -34vmax; animation-name: wp-x; animation-duration: 67s;
+  background: radial-gradient(closest-side, rgba(var(--wp-x), .30), rgba(var(--wp-x), .10) 50%, transparent 72%);
+}
+body::after {
+  right: -32vmax; bottom: -36vmax; animation-name: wp-y; animation-duration: 83s;
+  background: radial-gradient(closest-side, rgba(var(--wp-y), .24), rgba(var(--wp-y), .08) 50%, transparent 72%);
+}
+@keyframes wp-x { 0% { transform: translate3d(0, 0, 0); } 55% { transform: translate3d(24vmax, 14vmax, 0) scale(1.06); } 100% { transform: translate3d(34vmax, 26vmax, 0) scale(.96); } }
+@keyframes wp-y { 0% { transform: translate3d(0, 0, 0); } 45% { transform: translate3d(-20vmax, -16vmax, 0) scale(.95); } 100% { transform: translate3d(-34vmax, -24vmax, 0) scale(1.05); } }
+
+/* The window: opaque and theme-aware, so every text contrast is the theme's own. It floats over the wallpaper. */
+main {
+  width: min(1120px, calc(100% - 2 * clamp(12px, 3vw, 40px)));
+  margin: clamp(14px, 2.6vw, 28px) auto clamp(28px, 5vw, 64px);
+  padding-bottom: 72px;
+  background: var(--ground); border-radius: 22px; overflow: clip;
+  border: 1px solid rgba(255, 255, 255, .08);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .25), 0 30px 80px -28px rgba(0, 0, 0, .65);
+}
+:root[data-theme="dark"] main { border-color: rgba(255, 255, 255, .07); }
+/* The toolbar is glass over the wallpaper; its tint still follows the theme. */
+.rail { border-bottom-color: rgba(255, 255, 255, .08); }
+@media (max-width: 560px) {
+  main { width: 100%; margin: 0; border-radius: 0; border: 0; box-shadow: none; min-height: calc(100dvh - 92px); } /* on a phone the window is the screen */
+}
+@media (prefers-reduced-transparency: reduce) { body::before, body::after { display: none; } }
+@media (prefers-contrast: more) { body::before, body::after { display: none; } main { border: 1px solid var(--rule-2); } }
+@media print {
+  html { background: #fff; }
+  body::before, body::after { display: none; }
+  main { width: auto; margin: 0; border: 0; border-radius: 0; box-shadow: none; overflow: visible; }
+}

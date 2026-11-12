@@ -479,3 +479,14 @@ permutation test, the 95% percentile bootstrap interval, the Wilcoxon sensitivit
 (first added in commit `ed56c57`), and `scripts/run_analysis.py` runs it on a complete full run only. What is still
 true: no real-model pilot or full run exists, so H1–H3 are untested and no test result has been computed. The
 earlier entry is left as written; this note supersedes that one line.
+
+---
+
+## Project conclusion (2026-11-12)
+
+**Cooperation Lab is complete** as an open AI-agent sandbox, released as v1.1.0.
+
+- **What it does:** two agents (rule-based, free local models, the user's own API keys, HTTP services or Python files) negotiate over resources the user defines, with events, sweeps, personas and repetitions; the analysis gives behaviour profiles, reactions and group comparisons with 95% intervals and n, and a report that reads in plain words first with every detail underneath.
+- **How it is checked:** tests on Ubuntu, Windows and macOS with Python 3.10–3.13 (CI matrix), an install smoke test on each, security probes (XSS, CSRF and DNS rebinding, path traversal, key leaks, public-demo lockout), accuracy recomputed from the exported CSVs, and a fresh-user test. Bugs found in hardening: 11, all fixed (docs/qa/hardening-log.md).
+- **Where it runs:** `pip install git+https://github.com/Jenoyrex/multi-agent-cooperation`, then `cooperation-lab`; the public demo (rule-based only) is at https://cooperation-lab.onrender.com.
+- **The research study is still not run.** The preregistered Claude-vs-GPT study (docs/spec.md) is built and tested offline, but no paid pilot or full run has happened, so H1–H3 remain untested and there are no study results. Running it needs the team's API keys and a decision to spend (docs/run-checklist.md, docs/budget-plan.md). Every result in the repository is from rule-based simulations, test fixtures, a fake model server or a free local model, labelled as such.

@@ -79,7 +79,9 @@ def catalog() -> dict:
 
 
 def get(path: str) -> tuple[dict, int]:
-    usage = _usage() if path.startswith(("/api/workbench/agents", "/api/workbench/environments", "/api/workbench/overview")) else {}
+    # Only the agent and environment pages show where each was used; the overview never did, but paid for it
+    # (decoding every saved experiment twice).
+    usage = _usage() if path.startswith(("/api/workbench/agents", "/api/workbench/environments")) else {}
     if path == "/api/workbench/catalog":
         return catalog(), 200
     if path == "/api/workbench/local-llm/models":
