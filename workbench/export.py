@@ -7,6 +7,7 @@ import io
 import json
 
 from sandbox import analysis as SA
+from workbench import readable
 from workbench.analytics import analyse
 
 FILES = {
@@ -164,12 +165,26 @@ def _report(doc: dict) -> str:
                     "| agent | demand before | demand after | change | 95% CI | n |\n|---|---|---|---|---|---|\n" + "\n".join(
                         f"| {_cell(cfg['agents'][k]['name'])} | {_fmt(v['before']['mean'])} | {_fmt(v['after']['mean'])} | {_fmt(v['shift']['mean'])} | "
                         f"{' to '.join(f'{x:.3f}' for x in (v['shift']['ci'] or [])) or 'too few'} | {v['shift']['n']} |" for k, v in r["agents"].items()) + "\n")
+    R = readable.summary(doc, a)
+    agent_md = []
+    for g in R["agents"]:
+        agent_md += [f"**{g['name']}**" + (f" ({g['source']})" if g["source"] else ""), "", *(f"- {line}" for line in g["lines"]), ""]
+    plain = "\n".join([
+        "## The short version", R["headline"], "",
+        *(f"- {pt['text']}" for pt in R["points"]), "",
+        "## Key numbers", "| measure | value | what it means | exact |", "|---|---|---|---|",
+        *(f"| {_cell(k['label'])} | **{_cell(k['value'])}** | {_cell(k['meaning'])} | {_cell(k['exact'])} |" for k in R["numbers"]), "",
+        "## Each agent, in plain words", "", *agent_md,
+        "## Good to know before you quote these numbers", *(f"- {c}" for c in R["caveats"]), "",
+        "The full details follow: every table, definition, limitation and record behind the summary above.", ""])
+    words = "\n".join(f"- **{t}**: {d}" for t, d in R["glossary"])
     return f"""# {cfg['name']}
 
 > **{cfg['label']}**
 > {scope}
 > {sb['exploratory']}
 
+{plain}
 ## Configuration
 - Simulation `{doc['id']}`, status **{doc['status']}**, {a['n_completed']} of {doc['plan_size']} negotiations completed
   {f"({', '.join(f'{v} {k}' for k, v in a['not_outcomes'].items())}, not outcomes)" if a['not_outcomes'] else ''}.
@@ -214,5 +229,8 @@ RWE and EW score failed negotiations as 0; SWE and equitability use agreed negot
 
 ## Limitations
 {chr(10).join(f'- {x}' for x in a['not_available'])}
+
+## Words used in this report
+{words}
 - Two agents per negotiation: the frozen protocol is bilateral.
 """

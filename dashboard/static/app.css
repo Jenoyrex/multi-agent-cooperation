@@ -1454,3 +1454,28 @@ td.metric .sub { display: block; }
 .spend { margin: 0 0 6px; display: grid; gap: 2px; }
 #live-spend progress { width: 100%; height: 8px; accent-color: var(--accent); }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+
+/* Readable report: plain summary first, everything else under Full details (layout only; colours are theme tokens) */
+.report .lead { font-size: 1.15rem; font-weight: 600; margin: 0 0 10px; }
+.report .plainpoints { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.report .plainpoints li { display: grid; gap: 2px; padding-left: 14px; border-left: 3px solid var(--accent); }
+.report .keynums-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin: 0; }
+.report .keynums-grid > div { border: 1px solid var(--rule); border-radius: 12px; padding: 12px 14px; display: grid; gap: 2px; align-content: start; }
+.report .keynums-grid dt { font-weight: 600; }
+.report .keynums-grid dd { margin: 0; }
+.report .keynums-grid .big { font-size: 1.6rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.report .agentcards { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+.report .agentcard h3 { display: flex; gap: 8px; align-items: center; margin: 0 0 4px; overflow-wrap: anywhere; }
+.report .agentcard .plainlist { margin-top: 8px; }
+.report .readhint { border: 1px solid var(--rule); border-radius: 12px; padding: 12px 14px; margin-bottom: 14px; }
+.report .readhint .plainlist { margin: 6px 0; }
+.report .fulldetails { margin: 24px 0; border-top: 1px solid var(--rule); padding-top: 8px; }
+.report .fulldetails > summary { cursor: pointer; display: grid; gap: 2px; padding: 8px 0; list-style-position: outside; }
+.report .fulldetails > summary h2 { display: inline; margin: 0; }
+.report .fulldetails > section { margin-top: 18px; }
+.report .fulldetails h3 { margin-top: 0; }
+@media print {
+  .report .fulldetails > summary { list-style: none; }
+  .report .fulldetails > summary .sub { display: none; }
+  .report .keynums-grid > div, .report .agentcard, .report .readhint { break-inside: avoid; }
+}
