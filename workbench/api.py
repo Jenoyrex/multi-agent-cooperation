@@ -13,6 +13,7 @@ from src import zero_cost
 from workbench import agents as A, environments as E, export, simulations as S, store
 from workbench.agents import WorkbenchError
 from workbench import inspect_agent
+from workbench import readable
 from workbench.analytics import analyse
 
 ID = r"([0-9a-f]{12}|builtin-[a-z-]+)"
@@ -106,7 +107,10 @@ def get(path: str) -> tuple[dict, int]:
         return ({**E.preview(d, 0), "history": usage.get(d["id"], [])}, 200) if d else ({"error": "not found"}, 404)
     if m := re.fullmatch(r"/api/workbench/simulations/([0-9a-f]{12})", path):
         s = S.get(m[1])
-        return ({**s, "analytics": analyse(s)}, 200) if s else ({"error": "not found"}, 404)
+        if not s:
+            return {"error": "not found"}, 404
+        a = analyse(s)
+        return {**s, "analytics": a, "readable": readable.summary(s, a)}, 200
     if m := re.fullmatch(r"/api/workbench/simulations/([0-9a-f]{12})/export/([a-z]+\.(?:json|csv|md))", path):
         s = S.get(m[1])
         if not s or m[2] not in export.FILES:
