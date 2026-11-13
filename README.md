@@ -7,6 +7,7 @@ experiments, and get honest analysis of how they behave, bargain and share, in a
 [![Release](https://img.shields.io/github/v/release/Jenoyrex/multi-agent-cooperation)](https://github.com/Jenoyrex/multi-agent-cooperation/releases/latest)
 [![Live demo](https://img.shields.io/badge/live%20demo-online-0071e3)](https://cooperation-lab.onrender.com/)
 ![Python](https://img.shields.io/badge/python-3.10%E2%80%933.13-3776ab)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 **[Open the live demo](https://cooperation-lab.onrender.com/)** · **[Install it](#quick-start)** ·
 **[Latest release](https://github.com/Jenoyrex/multi-agent-cooperation/releases/latest)** · **[Docs](#documentation)**
@@ -27,6 +28,7 @@ experiments, and get honest analysis of how they behave, bargain and share, in a
 - [Limitations](#limitations)
 - [Documentation](#documentation)
 - [Team](#team)
+- [License](#license)
 
 ## What it is
 
@@ -349,3 +351,8 @@ multi-agent-cooperation/
 College group project by **P J Jenoy Rex**, **Amulya H N** and **M Sujatha**, guided by **Prof. Harshitha**.
 GitHub: [@Jenoyrex](https://github.com/Jenoyrex), [@sujathaa-m](https://github.com/sujathaa-m),
 [@4mh24cd002-stack](https://github.com/4mh24cd002-stack). Contributions: [docs/team.md](docs/team.md).
+
+## License
+
+[MIT](LICENSE) © 2026 P J Jenoy Rex, Amulya H N and M Sujatha. Third-party parts keep their own licences: Inter,
+JetBrains Mono and Barlow fonts (SIL Open Font License, `dashboard/static/fonts/`) and Motion (`dashboard/static/vendor/LICENSE-motion.md`).
